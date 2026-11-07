@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""Gateway-attested BT port synchronizer for standalone Stremio.
+"""Consume a trusted Gateway observer state to reconcile standalone Stremio.
 
-No credentials in repository or Docker. Selected host MAC, policy, fresh lease,
-TCP/UDP equivalence and current kernel gateway must all match. Fail closed.
+The observer owns HTTPS authentication and lease verification. Stremio only
+reads its fresh root-owned observation and is the sole .env/Docker writer.
 """
 from __future__ import annotations
+
 import fcntl
 import ipaddress
 import json
 import os
-from pathlib import Path
 import re
-import ssl
 import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import Request, ProxyHandler, HTTPSHandler, build_opener
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = ROOT / ".env"
 STATUS = Path("/var/lib/stremio-webadmin/port-status.json")
+OBSERVATION = Path("/var/lib/stremio-webadmin/gateway-port-observation.json")
 LOCK = Path("/run/lock/stremio-webadmin-port-sync.lock")
 CONF = Path("/etc/stremio-webadmin/port-sync.conf")
 KEY = "STREMIOSRV_BT_LISTEN_PORT"
@@ -86,30 +86,48 @@ def route_identity(expected_mac: str):
     return gw, nic, ips[0]
 
 
-def fetch_snapshot(gateway: str, port: int, path: str, ca: Path, token_file: Path):
-    if path not in ("/api/v1/port-forward/desired","/gateway/api/v1/port-forward/desired"):
-        raise PortSyncError("unsupported API path")
-    if not (1 <= port <= 65535) or not ca.is_file() or token_file.is_symlink():
-        raise PortSyncError("gateway TLS CA or status token not provisioned")
-    if not token_file.is_file() or token_file.stat().st_mode & 0o077:
-        raise PortSyncError("gateway status token must be owner-only")
-    token=token_file.read_text().strip()
-    if not re.fullmatch(r"[0-9a-f]{64,128}",token):
-        raise PortSyncError("invalid gateway status token")
-    url=f"https://{gateway}:{port}{path}"
-    ctx=ssl.create_default_context(cafile=str(ca))
-    opener=build_opener(ProxyHandler({}),HTTPSHandler(context=ctx))
-    with opener.open(Request(url,headers={"Authorization":"Bearer "+token,
-                                         "Accept":"application/json"}),timeout=8) as response:
-        if response.status!=200:
-            raise PortSyncError("non-200 gateway response")
-        raw=response.read(65537)
-    if len(raw)>65536:
-        raise PortSyncError("gateway response too long")
-    value=json.loads(raw)
-    if not isinstance(value,dict):
-        raise PortSyncError("invalid gateway payload")
-    return value
+def load_verified_observation(path: Path, *, policy: str, mac: str,
+                              host_ip: str, gateway: str, now: float):
+    """Consume the root-owned observation written by the separate observer.
+
+    The observer exclusively authenticates to the Gateway; this reconciler
+    trusts only its fresh local, root-owned attestation and owns Docker/.env.
+    """
+    if path.is_symlink() or not path.is_file():
+        raise PortSyncError("Gateway observation missing or not a regular file")
+    info = path.stat()
+    if info.st_uid != 0 or (info.st_mode & 0o077):
+        raise PortSyncError("Gateway observation ownership or permissions invalid")
+    if info.st_size > 4096:
+        raise PortSyncError("Gateway observation exceeds size limit")
+    try:
+        item = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PortSyncError("Gateway observation invalid JSON") from error
+    if not isinstance(item, dict) or type(item.get("schema")) is not int or item["schema"] != 1:
+        raise PortSyncError("unsupported Gateway observation schema")
+    if (item.get("policy_id") != policy
+        or str(item.get("registered_mac", "")).lower() != mac
+        or item.get("host_ip") != host_ip
+        or item.get("gateway") != gateway):
+        raise PortSyncError("Gateway observation host, policy or route identity differs")
+    observed = item.get("observed_at")
+    if type(observed) not in (int, float) or not observed <= now <= observed + 75:
+        return None
+    port, route = item.get("port"), item.get("route")
+    if type(port) is not int or not (1 <= port <= 65535):
+        return None
+    if route == "direct":
+        if port != 6881 or item.get("lease_issued_at") is not None or item.get("lease_expires_at") is not None:
+            return None
+        return port, route
+    if not isinstance(route, str) or not re.fullmatch(r"vpn-[a-z0-9-]{1,64}", route):
+        return None
+    issued, expiry = item.get("lease_issued_at"), item.get("lease_expires_at")
+    if (type(issued) not in (int, float) or type(expiry) not in (int, float)
+        or not issued <= now <= issued + 75 or expiry - now < 12):
+        return None
+    return port, route
 
 
 def effective_port():
@@ -129,17 +147,20 @@ def update_env(current: str, port: int):
     out=[]
     for line in lines:
         if re.match(r"^\s*"+KEY+r"\s*=",line):
-            if found:raise PortSyncError("duplicate port setting")
+            if found:
+                raise PortSyncError("duplicate port setting")
             out.append(f"{KEY}={port}")
             found=True
         else:
             out.append(line)
-    if not found:out.append(f"{KEY}={port}")
+    if not found:
+        out.append(f"{KEY}={port}")
     return "\n".join(out)+"\n"
 
 
 def atomic_write(path: Path, value: str):
-    if path.is_symlink(): raise PortSyncError("refusing symlink")
+    if path.is_symlink():
+        raise PortSyncError("refusing symlink")
     fd,name=tempfile.mkstemp(prefix=".port-sync-",dir=path.parent)
     try:
         os.fchmod(fd,0o600)
@@ -149,7 +170,8 @@ def atomic_write(path: Path, value: str):
             os.fsync(f.fileno())
         os.replace(name,path)
     finally:
-        if os.path.exists(name):os.unlink(name)
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def gpu_devices():
@@ -170,12 +192,22 @@ def verify_gpu_contract():
 
 
 def reconcile(port:int):
-    if effective_port()==port:
-        verify_gpu_contract()
-        return "unchanged"
     if not ENV.is_file() or ENV.is_symlink():
         raise PortSyncError("missing or untrusted environment file")
     old=ENV.read_text()
+    settings = [line.partition("=")[2].strip() for line in old.splitlines()
+                if re.match(r"^\s*" + KEY + r"\s*=", line)]
+    if len(settings) != 1:
+        raise PortSyncError("missing or duplicate BitTorrent listen-port setting")
+    try:
+        configured_port = int(settings[0])
+    except ValueError as error:
+        raise PortSyncError("invalid BitTorrent listen-port setting") from error
+    if effective_port() == port and configured_port == port:
+        verify_gpu_contract()
+        return "unchanged"
+    if effective_port() == port and configured_port != port:
+        raise PortSyncError("Docker listen port and host .env disagree; refusing silent success")
     atomic_write(ENV,update_env(old,port))
     try:
         run(["sh","start.sh","config","--quiet"],cwd=ROOT)
@@ -240,10 +272,10 @@ def main():
         expected_gateway=values.get("GATEWAY_IP","")
         if not expected_gateway or gw != expected_gateway:
             raise PortSyncError("gateway route not approved")
-        snapshot=fetch_snapshot(gw,int(values.get("API_PORT","9443")),
-                                values.get("API_PATH","/api/v1/port-forward/desired"),
-                                Path(values["CA_FILE"]),Path(values["TOKEN_FILE"]))
-        choice=validate(snapshot,policy,mac,host,time.time())
+        if values.get("SOURCE") != "observation":
+            raise PortSyncError("SOURCE=observation is required; direct Gateway API access is disabled")
+        choice=load_verified_observation(OBSERVATION,policy=policy,mac=mac,
+                                         host_ip=host,gateway=gw,now=time.time())
         if choice is None:
             status("no_verified_port_change",gateway=gw,
                    detail="no fresh authenticated port assignment for this host")
@@ -259,6 +291,7 @@ def main():
 if __name__=="__main__":
     try:
         sys.exit(main())
-    except Exception as exc:
+    except (PortSyncError, OSError, ValueError, KeyError, TypeError,
+            subprocess.SubprocessError, BlockingIOError) as exc:
         status("error",detail=str(exc))
         sys.exit(1)
