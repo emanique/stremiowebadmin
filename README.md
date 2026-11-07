@@ -37,22 +37,27 @@
 
 ## 🖥️ WebAdmin gallery
 
-Screenshots are being prepared from the functional application. The slots below describe the required captures; images will only be displayed after they have been supplied and reviewed.
+The initial screenshot set has been captured from the running standalone application. The files are being reviewed and prepared for publication. The gallery below identifies each capture; image elements will be activated only after the files are present in both repositories, to avoid broken README images.
 
-| Screenshot to provide | What it should show |
+| Screenshot | Functional evidence |
 |---|---|
-| `docs/screenshots/dashboard.png` | Dashboard, health and component versions |
-| `docs/screenshots/configuration.png` | General server and network configuration |
-| `docs/screenshots/playback.png` | Streaming activity, peers and transcoding |
-| `docs/screenshots/vaapi.png` | GPU/VAAPI device detection and codec capability |
-| `docs/screenshots/library.png` | Media/library management, where enabled |
-| `docs/screenshots/port-forwarding.png` | Local BitTorrent port and authenticated Gateway assignment |
-| `docs/screenshots/logs.png` | Service logs and diagnosis |
-| `docs/screenshots/webplayer.png` | WebPlayer with live playback |
+| `docs/screenshots/dashboard.png` | Service status, HTTPS certificate, runtime versions, streams/cache and automatic transcoding status |
+| `docs/screenshots/configuration.png` | Server parameters: network, BitTorrent, caching, bandwidth and seeding |
+| `docs/screenshots/configuration-2.png` | Playback, adaptive download, next-episode prefetch and automatic transcoding |
+| `docs/screenshots/configuration-3.png` | Library access, TLS and diagnostics |
+| `docs/screenshots/logs.png` | Separate Stremio and WebAdmin logs and troubleshooting |
+| `docs/screenshots/port-forwarding.png` | Host-owned TCP/UDP BitTorrent port; Gateway verification status is explicitly distinguished |
+| `docs/screenshots/library.png` | My Library addon, saved/downloaded media and cache management |
+| `docs/screenshots/vaapi.png` | VAAPI device readiness, codec capability and live FFmpeg metrics |
+| `docs/screenshots/playback.png` | Streams, cache utilisation, download progress and Pin/Delete controls |
+| `docs/screenshots/webplayer.png` | IPTV channel discovery and the web-based streaming interface |
 
-<!-- When screenshots are available, replace this comment with a 2-column HTML
-gallery referencing the filenames above. Check that private IPs, API keys,
-tokens, public IPs and identifiable media account data have been redacted. -->
+The screenshots demonstrate the interface and observed functionality, **not** successful external NAT-PMP assignment, Internet peer reachability or successful playback on every television platform. The media view and TLS/port indicators are runtime snapshots rather than blanket compatibility guarantees.
+
+<!-- Once reviewed images are uploaded to BOTH repos in docs/screenshots/,
+replace this table with a responsive two-column image gallery.
+Do not disclose DNS/IP identifiers, QR connection data, addon tokens or
+private media history in the public screenshots. -->
 
 ## 🚀 What makes the standalone edition different?
 
