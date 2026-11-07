@@ -153,7 +153,7 @@ For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token,
 
 ## 🧪 Release readiness
 
-**Current public source candidate:** standalone `0.1.2` (WebAdmin `3.0.14`, Core `1.6.34`). Public clone and source/DEB archive builds have been validated. Python 3.12 compilation, Docker Compose base/VAAPI configuration and package SHA-256 validation passed. The initial isolated regression executed 1,506 passing tests, 59 skips and 14 environment-sensitive failures; storage-dependent tests were subsequently rerun with 31 passing and 3 external-metadata skips, Docker Compose contracts passed (4/4) and the Library inline JavaScript passed Node syntax checking. This is a set of targeted validations, **not** a passed clean-install/end-to-end release gate.
+**Public source candidate:** standalone `0.1.2` (WebAdmin `3.0.14`, Core `1.6.34`). **The full locked Python regression passed on Debian 13 QA: 1,583 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. The release is still conditional on a second-host clean-install and security acceptance; no production readiness is implied.
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 
