@@ -52,6 +52,6 @@ All screenshots are added first under `docs/screenshots/` in DEV. Keep the same 
 - Authenticated external Gateway lease **change**, automatic BT port update and rollback after failed recreation need end-to-end verification.
 - Extended IPTV playback on real clients remains an acceptance item.
 - Source-built local Docker images are supported; immutable published GHCR images are **not** a claimed release property.
-- Current WebAdmin has privileged management capabilities without a validated Internet-facing authentication boundary. Restrict administration to a trusted LAN.
+- WebAdmin HTTPS Basic authentication has been implemented for new installations; validate its behaviour on clean QA before declaring release acceptance. Restrict administration to a trusted LAN.
 
 Until the above safety and functional gates are satisfied or explicitly documented as accepted limitations, maintain a **release-candidate** status; do not represent a public tag as fully qualified.

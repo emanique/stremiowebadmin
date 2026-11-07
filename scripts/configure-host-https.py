@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Provision HTTPS for WebAdmin on the *current host IPv4*, not a fixed DEV IP."""
 from __future__ import annotations
+
 import argparse
+import grp
 import ipaddress
 import os
-from pathlib import Path
 import re
+import secrets
 import subprocess
 import tempfile
+from pathlib import Path
 
 
 def execute(*args, **kwargs):
@@ -43,6 +46,8 @@ server {{
     add_header Cache-Control "no-store" always;
     client_max_body_size 2m;
     location / {{
+        auth_basic "Stremio WebAdmin";
+        auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;
         proxy_pass http://127.0.0.1:8090;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -64,11 +69,57 @@ def certificate_matches(cert: Path, ip: str) -> bool:
     return proc.returncode == 0
 
 
+def ensure_admin_auth(base: Path) -> None:
+    """Fail closed: Nginx workers must only read the password hash.
+
+    The initial password is printed exactly once and never written to disk.
+    Future setup/reconciliation runs preserve the existing password hash.
+    """
+    path = base / "webadmin.htpasswd"
+    try:
+        www_data = grp.getgrnam("www-data").gr_gid
+    except KeyError as error:
+        raise RuntimeError("Nginx www-data group is required") from error
+    if path.is_symlink():
+        raise RuntimeError("refusing symlinked WebAdmin password file")
+    if path.exists():
+        if not path.is_file() or not path.read_text().startswith("admin:$6$"):
+            raise RuntimeError("existing WebAdmin credential is invalid")
+    else:
+        password = secrets.token_urlsafe(30)
+        hashed = execute("openssl", "passwd", "-6", "-stdin",
+                         input=password + "\n").stdout.strip()
+        if not hashed.startswith("$6$"):
+            raise RuntimeError("OpenSSL did not produce SHA-512 password hash")
+        fd, staged = tempfile.mkstemp(prefix=".webadmin-password-", dir=base)
+        try:
+            os.fchmod(fd, 0o640)
+            os.fchown(fd, 0, www_data)
+            with os.fdopen(fd, "w") as handle:
+                handle.write("admin:" + hashed + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(staged, path)
+        finally:
+            if os.path.exists(staged):
+                os.unlink(staged)
+        print("New Stremio WebAdmin administrator credentials.")
+        print("Username: admin")
+        print("Initial password (shown only once): " + password)
+        print("Store it securely. To rotate: sudo python3 scripts/change-webadmin-password.py")
+    # Permit Nginx workers to traverse the directory, not to read private keys.
+    os.chown(base, 0, www_data)
+    os.chmod(base, 0o750)
+    os.chown(path, 0, www_data)
+    os.chmod(path, 0o640)
+
+
 def provision(ip: str) -> None:
     if os.geteuid() != 0:
         raise PermissionError("run the HTTPS host installer as root")
     base = Path("/etc/stremio-webadmin")
     base.mkdir(mode=0o700, exist_ok=True)
+    ensure_admin_auth(base)
     cert, key = base / "webadmin.crt", base / "webadmin.key"
     if not certificate_matches(cert, ip) or not key.is_file():
         with tempfile.TemporaryDirectory(dir=base) as temp:

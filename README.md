@@ -120,7 +120,7 @@ sudo git clone https://github.com/emanique/stremiowebadmin.git /opt/stremio-serv
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
-**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. A clean installation on an independent QA machine is still required before declaring the first tagged release production-ready.
+**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The first setup prints a one-time WebAdmin administrator password; store it securely and rotate it using scripts/change-webadmin-password.py. A clean installation on an independent QA machine is still required before declaring the first tagged release production-ready.
 
 ### Install from a release package
 
@@ -147,7 +147,7 @@ These are defaults, not a guarantee that a firewall or reverse proxy permits ext
 
 ## 🔒 Security
 
-**The current standalone WebAdmin has privileged Docker management capabilities and is not suitable for direct Internet exposure without an independently validated authentication boundary.** Restrict TCP 443 to a trusted administrator LAN and apply host firewall rules. Treat the Docker socket, environment files, provider credentials and API tokens as privileged secrets.
+**The standalone WebAdmin has privileged Docker management capabilities. New installs require HTTP Basic authentication via Nginx HTTPS, while the direct WebAdmin remains on loopback.** Restrict TCP 443 to a trusted administrator LAN and apply host firewall rules. Treat the Docker socket, environment files, provider credentials and API tokens as privileged secrets.
 
 For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token, the expected host MAC/IP and policy identity, a current lease, and verified matching TCP/UDP port values. Never embed private keys or tokens in examples, screenshots or release packages.
 

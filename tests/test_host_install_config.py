@@ -1,8 +1,9 @@
 """Deployment identity and GPU settings are host-specific."""
 from __future__ import annotations
+
 import importlib.util
-from pathlib import Path
 import stat
+from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -47,7 +48,8 @@ def test_https_config_generated_per_host():
         assert f"server_name {ip};" in site
         assert "proxy_pass http://127.0.0.1:8090;" in site
         assert "192.168.1.221" not in site
-        assert "auth_basic " not in site
+        assert 'auth_basic "Stremio WebAdmin";' in site
+        assert "auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;" in site
 
 
 def test_gateway_status_not_hardcoded():

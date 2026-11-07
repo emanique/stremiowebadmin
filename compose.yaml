@@ -73,7 +73,7 @@ services:
       STREMIO_CONTAINER: stremio-libtorrent-server
       STREMIO_IMAGE: stremioserverwebadmin-core:dev
       WEBADMIN_IMAGE: stremioserverwebadmin-webadmin:dev
-      STREMIO_SOURCE_REPO: https://github.com/emanique/StremioServerWebAdmin
+      STREMIO_SOURCE_REPO: ${STREMIO_SOURCE_REPO:-https://github.com/emanique/stremiowebadmin}
       STREMIO_SOURCE_BRANCH: ${STREMIO_SOURCE_BRANCH:-main}
       STREMIO_RUNTIME_BRANCH: ${STREMIO_RUNTIME_BRANCH:-${STREMIO_SOURCE_BRANCH:-main}}
       STREMIO_TARGET_SERVER_VERSION: ${STREMIO_TARGET_SERVER_VERSION:-1.6.34}
