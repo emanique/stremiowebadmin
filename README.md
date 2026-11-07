@@ -120,7 +120,7 @@ sudo git clone https://github.com/emanique/stremiowebadmin.git /opt/stremio-serv
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
-**Do not treat the current README-only public branch as installable until the full source promotion is complete.** The setup builds Docker images locally and configures the host services; it must be tested on a clean machine before a release is declared ready.
+**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. A clean installation on an independent QA machine is still required before declaring the first tagged release production-ready.
 
 ### Install from a release package
 
@@ -152,6 +152,8 @@ These are defaults, not a guarantee that a firewall or reverse proxy permits ext
 For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token, the expected host MAC/IP and policy identity, a current lease, and verified matching TCP/UDP port values. Never embed private keys or tokens in examples, screenshots or release packages.
 
 ## 🧪 Release readiness
+
+**Current public source candidate:** standalone `0.1.2` (WebAdmin `3.0.14`, Core `1.6.34`). Public clone and source/DEB archive builds have been validated. Python 3.12 compilation, Docker Compose base/VAAPI configuration and package SHA-256 validation passed. The initial isolated regression executed 1,506 passing tests, 59 skips and 14 environment-sensitive failures; storage-dependent tests were subsequently rerun with 31 passing and 3 external-metadata skips, Docker Compose contracts passed (4/4) and the Library inline JavaScript passed Node syntax checking. This is a set of targeted validations, **not** a passed clean-install/end-to-end release gate.
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 
