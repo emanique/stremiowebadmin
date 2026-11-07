@@ -109,7 +109,7 @@ def test_main_consumes_observation_without_contacting_gateway(monkeypatch,tmp_pa
     monkeypatch.setattr(mod,"CONF",conf)
     monkeypatch.setattr(mod,"OBSERVATION",observation_path)
     monkeypatch.setattr(mod,"LOCK",tmp_path/"lock")
-    monkeypatch.setattr(mod,"route_identity",lambda mac:(GW,"ens18",IP))
+    monkeypatch.setattr(mod,"route_identity",lambda mac:("192.168.1.1","ens18",IP))
     monkeypatch.setattr(mod,"reconcile",lambda p:state.append(p) or "recreated")
     assert not hasattr(mod,"fetch_snapshot")
     monkeypatch.setattr(mod,"status",lambda *a,**kw:None)
@@ -118,12 +118,28 @@ def test_main_consumes_observation_without_contacting_gateway(monkeypatch,tmp_pa
     assert state==[45001]
 
 
+def test_observation_gateway_differs_from_default_router(monkeypatch,tmp_path):
+    seen = []
+    cfg=tmp_path/"port-sync.conf"
+    cfg.write_text("ENABLED=1\nSOURCE=observation\nPOLICY_ID=stremio\n"
+                   "HOST_MAC=bc:24:11:53:5f:65\nGATEWAY_IP=192.168.1.231\n")
+    monkeypatch.setattr(mod,"CONF",cfg)
+    monkeypatch.setattr(mod,"OBSERVATION",write(tmp_path,observation(port=45001)))
+    monkeypatch.setattr(mod,"LOCK",tmp_path/"lock")
+    monkeypatch.setattr(mod,"route_identity",lambda mac:("192.168.1.1","ens18",IP))
+    monkeypatch.setattr(mod,"reconcile",lambda p:seen.append(p) or "recreated")
+    monkeypatch.setattr(mod,"status",lambda *a,**kw:None)
+    monkeypatch.setattr(mod.time,"time",lambda:NOW)
+    assert mod.main()==0
+    assert seen==[45001]
+
+
 def test_direct_api_mode_refused(monkeypatch,tmp_path):
     conf=tmp_path/"port-sync.conf"
     conf.write_text("ENABLED=1\nSOURCE=direct\nPOLICY_ID=stremio\n"
                     "HOST_MAC=bc:24:11:53:5f:65\nGATEWAY_IP=192.168.1.231\n")
     monkeypatch.setattr(mod,"CONF",conf)
     monkeypatch.setattr(mod,"LOCK",tmp_path/"lock")
-    monkeypatch.setattr(mod,"route_identity",lambda mac:(GW,"ens18",IP))
+    monkeypatch.setattr(mod,"route_identity",lambda mac:("192.168.1.1","ens18",IP))
     with pytest.raises(mod.PortSyncError,match="observation"):
         mod.main()

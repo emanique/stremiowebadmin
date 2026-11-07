@@ -268,10 +268,17 @@ def main():
     mac=values["HOST_MAC"].lower()
     with LOCK.open("a+") as h:
         fcntl.flock(h,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        gw,_,host=route_identity(mac)
-        expected_gateway=values.get("GATEWAY_IP","")
-        if not expected_gateway or gw != expected_gateway:
-            raise PortSyncError("gateway route not approved")
+        router,nic,host=route_identity(mac)
+        # The VPN management endpoint may be a separate LAN machine; the
+        # Internet's default-router next hop is not necessarily the VPN Gateway.
+        selected=values.get("GATEWAY_IP","")
+        try:
+            vpn_gateway=ipaddress.IPv4Address(selected)
+        except ipaddress.AddressValueError as error:
+            raise PortSyncError("explicit VPN Gateway LAN IPv4 required") from error
+        if not vpn_gateway.is_private or vpn_gateway.is_loopback or vpn_gateway.is_link_local:
+            raise PortSyncError("VPN Gateway management IPv4 must be private LAN")
+        gw=str(vpn_gateway)
         if values.get("SOURCE") != "observation":
             raise PortSyncError("SOURCE=observation is required; direct Gateway API access is disabled")
         choice=load_verified_observation(OBSERVATION,policy=policy,mac=mac,
@@ -281,8 +288,8 @@ def main():
                    detail="no fresh authenticated port assignment for this host")
             return 0
         port,route=choice
-        if route_identity(mac)!=(gw,_,host):
-            raise PortSyncError("route changed after gateway request")
+        if route_identity(mac)!=(router,nic,host):
+            raise PortSyncError("host egress route changed after observation")
         outcome=reconcile(port)
         status(outcome,port=port,gateway=gw,route=route)
     return 0

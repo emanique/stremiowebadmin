@@ -68,3 +68,12 @@ After authorised provisioning, validate the live sequence:
 
 Do not present this simulation as external reachability or a completed live
 lease-change test.
+
+## Separate default router versus VPN Gateway (rc.6)
+
+The reconciler now treats the kernel-derived default router as a routing
+integrity condition, not as the authenticated Gateway server identity.
+`GATEWAY_IP` explicitly identifies the VPN Gateway LAN management endpoint,
+which must match the root-owned observer record. The dedicated test where
+the router is 192.168.1.1 but the Gateway is 192.168.1.231 passed.
+The full frozen suite passed with 1,629 tests and 2 skips.
