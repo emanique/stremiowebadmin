@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def render_compose():
     env = os.environ.copy()
     env["IPADDRESS"] = "192.168.1.221"
+    env["STREMIO_DNS_SERVER"] = "192.0.2.53"  # TEST-NET, no external DNS
     env["STREMIOSRV_BT_LISTEN_PORT"] = "6881"  # independent of local Gateway allocation
     return json.loads(
         subprocess.check_output(
