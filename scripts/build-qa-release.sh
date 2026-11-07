@@ -24,7 +24,7 @@ Section: net
 Priority: optional
 Architecture: all
 Maintainer: StremioServerWebAdmin DEV <dev-stremioserverwebadmin@users.noreply.github.com>
-Depends: docker.io | docker-ce, docker-compose-v2 | docker-compose-plugin, nginx, python3, iproute2, openssl, ca-certificates
+Depends: docker.io | docker-ce, docker-compose-v2 | docker-compose-plugin | docker-compose, nginx, python3, iproute2, openssl, ca-certificates
 Description: Standalone Stremio Core and WebAdmin source-build package
  Docker Compose application, hardware transcoding and host reconcile tooling.
  This package carries sources; it does not contain published GHCR images.
