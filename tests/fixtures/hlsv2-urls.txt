@@ -1,0 +1,8 @@
+/hlsv2/11470-nvenc-linux-video-hevc.mkv/destroy
+/hlsv2/11470-nvenc-linux-video-hevc.mkv/video0.m3u8
+/hlsv2/11470-nvenc-linux-video-hevc.mkv/video0.m3u8?mediaURL=http%3A%2F%2F127.0.0.1%3A11470%2Fsamples%2Fhevc.mkv&profile=nvenc-linux&maxWidth=1200
+/hlsv2/11470-qsv-linux-video-hevc.mkv/destroy
+/hlsv2/11470-qsv-linux-video-hevc.mkv/video0.m3u8?mediaURL=http%3A%2F%2F127.0.0.1%3A11470%2Fsamples%2Fhevc.mkv&profile=qsv-linux&maxWidth=1200
+/hlsv2/11470-vaapi-renderD128-video-hevc.mkv/destroy
+/hlsv2/11470-vaapi-renderD128-video-hevc.mkv/video0.m3u8
+/hlsv2/11470-vaapi-renderD128-video-hevc.mkv/video0.m3u8?mediaURL=http%3A%2F%2F127.0.0.1%3A11470%2Fsamples%2Fhevc.mkv&profile=vaapi-renderD128&maxWidth=1200

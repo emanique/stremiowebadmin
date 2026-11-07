@@ -1,0 +1,21 @@
+# VAAPI-only overlay. Pass only the render node required for hardware
+# transcoding. This is LXC-safe and avoids invalid /dev/dri/card* entries
+# exposed by some unprivileged Proxmox containers.
+#
+# Prefer start.sh, which discovers and exports the working render node.
+# Direct Compose use must set VAAPI_DEVICE explicitly.
+#
+#   VAAPI_DEVICE=/dev/dri/renderD129 docker compose -f compose.yaml -f compose.vaapi.yaml up -d
+services:
+  stremio-libtorrent-server:
+    devices:
+      - "${VAAPI_DEVICE:?VAAPI_DEVICE must point to a detected /dev/dri/renderD* device}:${VAAPI_DEVICE:?VAAPI_DEVICE must point to a detected /dev/dri/renderD* device}"
+    # Forward an explicit driver override only when start.sh exports one.
+    # If unset, LIBVA_DRIVER_NAME must be absent so libva can auto-detect
+    # the correct driver (for example Intel iHD).
+    environment:
+      - LIBVA_DRIVER_NAME
+
+  webadmin:
+    environment:
+      VAAPI_DEVICE: "${VAAPI_DEVICE:?VAAPI_DEVICE must point to a detected /dev/dri/renderD* device}"

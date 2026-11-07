@@ -1,0 +1,62 @@
+# StremioServerWebAdmin v0.1.0-rc.4 - QA candidate
+
+Scope: standalone StremioServerWebAdmin. VPN Gateway is not modified.
+
+Component versions: Core 1.6.34; original WebAdmin base 3.0.14.
+Distribution: source tarball and Debian source package (.deb), with local Docker image builds.
+
+## Included
+- HLS: Core owns copy/transcode decisions; App Direct preserves HTTP Range.
+- Browser HEVC Main10 4K H.264 transcode cap at width 1920.
+- Continue Watching: full source duration instead of growing HLS window.
+- Host IP, DNS, HTTPS and VAAPI render node detection.
+- Host-only service/timer for local network and GPU reconciliation and read-only Gateway port polling.
+- Gateway status bind file pre-created before Docker Compose.
+
+## QA installation on Debian/Ubuntu
+
+    sudo apt install ./stremio-webadmin_0.1.0~rc4_all.deb
+    sudo stremio-webadmin-setup
+
+The setup builds local Docker images, configures HTTPS and enables systemd host reconciliation.
+An existing .env is preserved during upgrades.
+Do not deploy over an existing application using the same ports without a migration plan.
+
+## Blockers before production
+1. Complete live browser Continue Watching, seeking, audio, subtitle, and HLS acceptance.
+2. Host-specific Gateway policy/read-only token has not been provisioned on QA .199.
+3. GHCR versioned immutable images/digests are not yet published.
+4. Fresh-install plus rollback, reboot, upgrade and uninstall scenarios are not yet fully validated.
+5. Unauthenticated WebAdmin holds Docker socket privileges; management must be restricted.
+6. QA host has 4 GiB RAM; long HEVC/HDR runs need further testing.
+7. External Gateway DNS timeouts are not fixed or masked by this project.
+
+This candidate is a QA package, not an approved production release.
+
+## RC2 specific safeguards
+- Setup checks active Docker Stremio host IP and BitTorrent listen port before rebuilding.
+- If the package's .env differs from the active installation, setup stops before
+  changing the running service. Migrate the existing host-owned .env explicitly.
+- Release verification includes a package installation and service startup scenario.
+
+## RC3 HLS/M3U regression
+- Stable transcoder identity for repeated M3U/HLS master requests uses the
+  original media URL and explicit playback intent, not a short-lived reader ticket.
+- New source/seek/profile retains independent FFmpeg workloads.
+- Repeated failed FFmpeg executions are limited to two failures per 60 seconds,
+  with HTTP 503 and Retry-After: 60 instead of uncontrolled restarts.
+- Includes regression tests for token rotation, seek and repeated crashes.
+- Acceptance of a real long-running IPTV/M3U session remains required.
+
+## RC4 IPTV / MPEG-TS live
+- Tested live-source identification by MPEG-TS format and unknown duration.
+- H.264 and AAC stay in copy mode; AAC ADTS is converted to ASC without audio re-encoding.
+- Single-track live HLS uses a bounded eight-segment sliding fMP4 playlist.
+- Existing VOD event playlist, resume offset, VAAPI, DNS and BT port logic preserved.
+- Acceptance gate: prolonged real IPTV stream playback, audio/video continuity and correct response to provider disconnects.
+
+## Promotion policy
+This prerelease may be promoted to the main source branch for traceability and QA.
+It is NOT a production stable release until real-browser acceptance, Gateway-host port token,
+immutable GHCR images and clean-install/rollback scenarios are verified.
+No VPN Gateway policy or code is changed by this release.

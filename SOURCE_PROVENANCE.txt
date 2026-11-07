@@ -1,0 +1,2 @@
+SRC_SHA=68135d08723f4350728fda497c9ac8ba6b44e405
+Base source: emmanique/stremio-webadmin; originally 3.0.14, core 1.6.34. Read SOURCE_PROVENANCE.txt and LICENSE.

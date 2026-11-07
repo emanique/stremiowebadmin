@@ -1,0 +1,95 @@
+import os
+import time
+
+import pytest
+
+pytestmark = pytest.mark.integration
+
+lt = pytest.importorskip("libtorrent")
+
+from stremiosrv import cache as cachemod  # noqa: E402
+
+# A tiny, legal, well-seeded torrent (Debian netinst). Replace infohash/magnet if the fixture rots.
+DEBIAN_MAGNET = os.getenv(
+    "STREMIO_TEST_MAGNET",
+    "magnet:?xt=urn:btih:6f84758b0ddd8dc05840bf932a77935d8b5b8b93"
+    "&dn=debian-12.6.0-amd64-netinst.iso",
+)
+
+
+def _wait_for_metadata(handle, timeout=60):
+    deadline = time.time() + timeout
+    while not handle.has_metadata() and time.time() < deadline:
+        time.sleep(0.5)
+    if not handle.has_metadata():
+        pytest.skip(
+            "external BitTorrent metadata unavailable; "
+            "network/DHT reachability is not a release regression"
+        )
+
+
+def test_pin_is_pinned_and_pinned_status(tmp_path):
+    import json
+
+    from stremiosrv.torrent.engine import Engine
+    eng = Engine(listen_port=0, cache_root=str(tmp_path), cache_size=10 * 1024 ** 3)
+    h = eng.add(DEBIAN_MAGNET)
+    # wait for metadata so we have a name and can set piece priorities
+    _wait_for_metadata(h)
+    ih = h.info_hash().lower()
+    eng.pin(ih)
+    assert eng.is_pinned(ih)
+    names = eng.pinned_names()
+    assert len(names) >= 1
+    pins_file = tmp_path / "pins.json"
+    assert pins_file.exists()
+    saved = json.loads(pins_file.read_text())
+    assert any((e.get("infoHash") or "").lower() == ih for e in saved)
+    status = eng.pinned_status()
+    assert len(status) >= 1
+    assert status[0]["infoHash"] == ih
+    eng.shutdown()
+
+
+def test_name_index_written_on_save_resume(tmp_path):
+    from stremiosrv.torrent.engine import Engine
+    eng = Engine(listen_port=0, cache_root=str(tmp_path))
+    h = eng.add(DEBIAN_MAGNET)
+    _wait_for_metadata(h)
+    eng.save_all_resume()
+    ih = h.info_hash().lower()
+    name = h.name()
+    # wait for the alerts loop to process save_resume_data_alert and write the index
+    deadline = time.time() + 20
+    while deadline > time.time():
+        idx = cachemod.load_name_index(str(tmp_path))
+        if name in idx:
+            break
+        time.sleep(0.5)
+    assert name in idx, f"index missing name {name!r}; got {idx}"
+    assert idx[name].lower() == ih
+    eng.shutdown()
+
+
+def test_resume_file_written_and_skips_recheck(tmp_path):
+    from stremiosrv.torrent.engine import Engine
+    eng = Engine(listen_port=0, cache_root=str(tmp_path))
+    h = eng.add(DEBIAN_MAGNET)
+    # wait for metadata so save_resume_data has something to persist
+    _wait_for_metadata(h)
+    eng.save_all_resume()
+    ih = h.info_hash().lower()
+    resume = tmp_path / ".resume" / f"{ih}.fastresume"
+    deadline = time.time() + 20
+    while not resume.exists() and time.time() < deadline:
+        time.sleep(0.5)
+    assert resume.exists()
+    eng.shutdown()
+
+    # re-add from resume -> must NOT enter a checking state
+    eng2 = Engine(listen_port=0, cache_root=str(tmp_path))
+    h2 = eng2.add(DEBIAN_MAGNET)
+    time.sleep(2)
+    state = str(h2.status().state)
+    assert "checking" not in state.lower()
+    eng2.shutdown()

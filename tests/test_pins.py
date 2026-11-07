@@ -1,0 +1,463 @@
+import json
+
+from stremiosrv import cache, pins
+from stremiosrv.cache import load_name_index, save_name_index
+
+
+def test_protected_includes_resume_and_pins():
+    assert ".resume" in cache.PROTECTED
+    assert "pins.json" in cache.PROTECTED
+
+
+def test_save_and_load_pins_roundtrip(tmp_path):
+    entries = [{"infoHash": "abc", "name": "x.iso", "trackers": ["udp://t"], "addedAt": 1}]
+    pins.save_pins(str(tmp_path), entries)
+    assert json.loads((tmp_path / "pins.json").read_text()) == entries
+    assert pins.load_pins(str(tmp_path)) == entries
+    assert pins.pinned_hashes(str(tmp_path)) == {"abc"}
+
+
+def test_load_pins_missing_returns_empty(tmp_path):
+    assert pins.load_pins(str(tmp_path)) == []
+    assert pins.pinned_hashes(str(tmp_path)) == set()
+
+
+def test_headroom_is_cache_size_plus_10_percent():
+    assert pins.headroom(1000) == 1100
+
+
+def test_name_index_roundtrip(tmp_path):
+    mapping = {"movie.mkv": "deadbeef01", "show.mkv": "cafebabe02"}
+    save_name_index(str(tmp_path), mapping)
+    assert load_name_index(str(tmp_path)) == mapping
+
+
+def test_name_index_missing_returns_empty(tmp_path):
+    assert load_name_index(str(tmp_path)) == {}
+
+
+def test_pin_fits_truth_table():
+    # cache_size=1000 -> R=1100
+    # free 5000, no existing pins, candidate needs 3000 -> 5000-3000=2000 >= 1100 -> fits
+    assert pins.pin_fits(5000, 0, 3000, 1000) is True
+    # free 5000, existing pins need 3000, candidate needs 1000 -> 5000-4000=1000 < 1100 -> no
+    assert pins.pin_fits(5000, 3000, 1000, 1000) is False
+    # candidate alone too big
+    assert pins.pin_fits(2000, 0, 1500, 1000) is False
+
+
+def test_pinning_marks_every_file_wanted_not_just_every_piece():
+    """libtorrent stores pieces belonging to a file whose FILE priority is 0 in the
+    `.<infohash>.parts` holding file rather than the real file. A torrent that has been streamed
+    once has every other file at 0 (focus_file's `base`), so pinning it while only raising PIECE
+    priorities downloaded gigabytes into the partfile and left the directory empty — 30 GB of one
+    on a real box, with nothing playable on disk.
+    """
+    import inspect
+
+    from stremiosrv.torrent.engine import Engine, Handle
+    src = inspect.getsource(Engine._full_priority)
+    assert "want_all_files" in src, "_full_priority no longer raises FILE priorities"
+
+    want = inspect.getsource(Handle.want_all_files)
+    assert "prioritize_files" in want
+    assert "_focused_idx = None" in want, "focus_file would short-circuit and skip re-applying"
+    # Files must be set BEFORE pieces: prioritize_files overwrites every piece priority.
+    assert want.index("prioritize_files") < inspect.getsource(Engine._full_priority).index(
+        "prioritize_pieces") + len(want)
+
+
+# --- which file a pin actually wants ---------------------------------------------------------
+# Picking one episode used to download the whole pack: /api/download never carried a file index,
+# and pin() called want_all_files(). A season pack is ~39 GB for a 4.5 GB episode.
+
+from stremiosrv.pins import select_wanted_file  # noqa: E402
+
+EP = 4 << 30  # an episode's size; only the order of sizes matters here
+
+SEASON_PACK = [
+    ("Show.S01E01.Title.1080p.WEB-DL.mkv", EP),
+    ("Show.S01E02.Title.1080p.WEB-DL.mkv", EP),
+    ("Show.S01E05.Worldless.1080p.WEB-DL.mkv", EP),
+    ("Show.S01E09.Title.1080p.WEB-DL.mkv", EP),
+    ("NEW upcoming releases.txt", 1 << 10),
+]
+
+
+def test_no_want_means_every_file():
+    assert select_wanted_file(SEASON_PACK, None) is None
+    assert select_wanted_file(SEASON_PACK, {}) is None
+
+
+def test_explicit_file_index_wins():
+    assert select_wanted_file(SEASON_PACK, {"fileIdx": 3, "season": 1, "episode": 5}) == 3
+
+
+def test_out_of_range_index_falls_through_to_matching():
+    assert select_wanted_file(SEASON_PACK, {"fileIdx": 99, "season": 1, "episode": 5}) == 2
+
+
+def test_season_and_episode_pick_the_one_file():
+    assert select_wanted_file(SEASON_PACK, {"season": 1, "episode": 5}) == 2
+    assert select_wanted_file(SEASON_PACK, {"season": 1, "episode": 1}) == 0
+
+
+def test_episode_numbers_do_not_bleed_into_each_other():
+    """S01E1 must not match S01E10 — off-by-a-digit here silently downloads the wrong episode."""
+    pack = [("Show.S01E10.mkv", EP), ("Show.S01E01.mkv", EP)]
+    assert select_wanted_file(pack, {"season": 1, "episode": 1}) == 1
+    assert select_wanted_file(pack, {"season": 1, "episode": 10}) == 0
+
+
+def test_alternate_numbering_style():
+    assert select_wanted_file([("Show 1x05 Title.mkv", EP), ("Show 1x06 Title.mkv", EP)],
+                              {"season": 1, "episode": 5}) == 0
+
+
+def test_non_video_matches_are_not_preferred():
+    """Packs carry .nfo/.srt/.txt named after the episode; the video is what was asked for -- even
+    when a non-video is the larger file, so size never lets a subtitle win."""
+    pack = [("Show.S01E05.nfo", 1 << 10), ("Show.S01E05.srt", 2 * EP), ("Show.S01E05.mkv", EP)]
+    assert select_wanted_file(pack, {"season": 1, "episode": 5}) == 2
+
+
+def test_a_sample_sorting_first_does_not_stand_in_for_its_episode():
+    """A release's `Sample/` folder sorts before its episode whenever the show's name starts from
+    `T` on, or is lowercase. Taking the first match fetched the sample, never the episode, and the
+    page then showed the episode as downloaded. The episode is the largest video that names it --
+    the rule playback (guess_file_idx) and the addon (episode_index) already use."""
+    pack = [("Sample/the.show.s01e05.sample.mkv", 40 << 20),
+            ("the.show.s01e05.1080p.mkv", EP),
+            ("the.show.s01e06.1080p.mkv", EP)]
+    assert select_wanted_file(pack, {"season": 1, "episode": 5}) == 1
+
+
+def test_equal_sizes_keep_the_first_match():
+    pack = [("a/Show.S01E05.mkv", EP), ("b/Show.S01E05.mkv", EP)]
+    assert select_wanted_file(pack, {"season": 1, "episode": 5}) == 0
+
+
+def test_no_match_means_every_file():
+    """A film in a folder, or a pack that names episodes some other way: better to fetch it all
+    than to fetch nothing and leave the owner with an empty directory."""
+    assert select_wanted_file([("Some.Film.2019.1080p.mkv", EP)],
+                              {"season": 1, "episode": 5}) is None
+
+
+# --- which file a stream wants when the addon does not say -------------------------------------
+# A stream with no fileIdx leaves the choice to the server: stremio-video asks for a guess in
+# POST /<ih>/create, and stremio-core writes -1 into the URL it builds. The stock rule
+# (GuessFileIdx in server.reference.js): among the media files, the requested episode, else the
+# largest; -1 when nothing in the torrent is playable.
+
+from stremiosrv.pins import guess_file_idx  # noqa: E402
+
+MB = 1 << 20
+
+
+def test_guess_picks_the_largest_media_file():
+    files = [("Film/poster.jpg", 1 * MB), ("Film/Film.mkv", 900 * MB),
+             ("Film/Sample.mkv", 40 * MB)]
+    assert guess_file_idx(files, {}) == 1
+
+
+def test_guess_ignores_larger_files_that_are_not_media():
+    """A disc image or archive bigger than the film must not be what gets played."""
+    files = [("Film/extras.iso", 4000 * MB), ("Film/Film.mp4", 700 * MB)]
+    assert guess_file_idx(files, {}) == 1
+
+
+def test_guess_counts_audio_as_media():
+    assert guess_file_idx([("Album/cover.png", 2 * MB), ("Album/01.flac", 30 * MB)], {}) == 1
+
+
+def test_guess_is_minus_one_when_nothing_is_playable():
+    assert guess_file_idx([("readme.txt", 1), ("cover.jpg", 2)], {}) == -1
+    assert guess_file_idx([], {}) == -1
+
+
+def test_guess_prefers_the_requested_episode_over_a_larger_one():
+    files = [("Show.S01E01.mkv", 1200 * MB), ("Show.S01E02.mkv", 400 * MB)]
+    assert guess_file_idx(files, {"season": 1, "episode": 2}) == 1
+
+
+def test_guess_episode_numbers_do_not_bleed_into_each_other():
+    files = [("Show.S01E10.mkv", 900 * MB), ("Show.S01E01.mkv", 300 * MB)]
+    assert guess_file_idx(files, {"season": 1, "episode": 1}) == 1
+
+
+def test_guess_takes_the_largest_of_several_matches():
+    files = [("Show.S01E02.Sample.mkv", 20 * MB), ("Show.S01E02.mkv", 400 * MB)]
+    assert guess_file_idx(files, {"season": 1, "episode": 2}) == 1
+
+
+def test_guess_never_picks_a_matching_subtitle():
+    files = [("Show.S01E02.srt", 1 * MB), ("Show.S01E02.mkv", 400 * MB),
+             ("Show.S01E03.mkv", 500 * MB)]
+    assert guess_file_idx(files, {"season": 1, "episode": 2}) == 1
+
+
+def test_guess_falls_back_to_the_largest_when_the_episode_is_absent():
+    files = [("Show.S01E01.mkv", 300 * MB), ("Show.S01E02.mkv", 500 * MB)]
+    assert guess_file_idx(files, {"season": 1, "episode": 9}) == 1
+
+
+def test_guess_uses_a_season_zero_special():
+    """The stock server drops season 0 as falsy and plays the largest file instead; a special is
+    season 0 in the catalog, so it is honoured here."""
+    files = [("Show.S00E01.Special.mkv", 100 * MB), ("Show.S01E05.mkv", 200 * MB)]
+    assert guess_file_idx(files, {"season": 0, "episode": 1}) == 0
+
+
+def test_guess_without_both_numbers_means_largest():
+    files = [("Show.S01E01.mkv", 100 * MB), ("Show.S01E05.mkv", 200 * MB)]
+    assert guess_file_idx(files, {"episode": 1}) == 1
+    assert guess_file_idx(files, None) == 1
+
+
+def test_guess_keeps_the_first_of_equal_sizes():
+    assert guess_file_idx([("a.mkv", 5), ("b.mkv", 5)], {}) == 0
+
+
+# --- applying a pin's file choice --------------------------------------------------------------
+# The choice is recorded at pin time, when a magnet has no file list, so it has to be applied
+# later. The first attempt keyed that off metadata_received_alert -- which is in the
+# status_notification category, and the session's default alert mask is error-only (measured on a
+# live box: mask=1, status bit=64, off). The alert never arrived, the choice was never applied,
+# and a whole season pack downloaded for one episode.
+
+def test_a_deferred_choice_is_applied_once_metadata_arrives():
+    from stremiosrv.torrent.engine import Engine
+
+    class FakeHandle:
+        def __init__(self):
+            self.meta = False
+            self.only = None
+
+        def has_metadata(self):
+            return self.meta
+
+        def file_paths(self):
+            return ["Show.S01E01.mkv", "Show.S01E02.mkv", "Show.S01E03.mkv"]
+
+        def file_size(self, idx):
+            return EP
+
+        def want_file(self, idx):
+            self.only = idx
+
+    class FakeEngine:
+        _apply_wanted = Engine._apply_wanted
+        _apply_pending_wanted = Engine._apply_pending_wanted
+
+        def __init__(self, h):
+            self._wanted = {"aa": [{"fileIdx": 1}]}
+            self._wanted_applied = set()
+            self._torrents = {"aa": h}
+
+        def _full_priority(self, h):
+            raise AssertionError("wanted one file, not all of them")
+
+    h = FakeHandle()
+    e = FakeEngine(h)
+
+    e._apply_pending_wanted()
+    assert h.only is None and not e._wanted_applied, "applied before the file list existed"
+
+    h.meta = True
+    e._apply_pending_wanted()
+    assert h.only == 1 and e._wanted_applied == {"aa"}
+
+    h.only = None
+    e._apply_pending_wanted()
+    assert h.only is None, "re-applied a choice already made; the sweep must settle"
+
+
+def test_a_download_by_episode_wants_the_episode_not_its_sample():
+    """Through the engine, the way a page download arrives: season and episode, no fileIdx. The
+    sizes have to reach the choice from the handle, or the sample sorting first still wins."""
+    from stremiosrv.torrent.engine import Engine
+
+    files = [("Sample/the.show.s01e05.sample.mkv", 40 << 20),
+             ("the.show.s01e05.1080p.mkv", EP),
+             ("the.show.s01e06.1080p.mkv", EP)]
+
+    class FakeHandle:
+        def __init__(self):
+            self.wanted = []
+
+        def file_paths(self):
+            return [p for p, _ in files]
+
+        def file_size(self, idx):
+            return files[idx][1]
+
+        def want_file(self, idx):
+            self.wanted.append(idx)
+
+    class FakeEngine:
+        _apply_wanted = Engine._apply_wanted
+
+        def _full_priority(self, h):
+            raise AssertionError("wanted one file, not all of them")
+
+    h = FakeHandle()
+    FakeEngine()._apply_wanted(h, [{"season": 1, "episode": 5}])
+    assert h.wanted == [1]
+
+
+def test_the_choice_is_not_driven_by_an_alert_that_never_arrives():
+    """Guards the regression directly: the deferred apply must not depend on an alert category the
+    session does not subscribe to. It is driven from the alerts loop's own cadence instead."""
+    import pathlib
+
+    from stremiosrv.torrent import engine as eng
+    src = pathlib.Path(eng.__file__).read_text(encoding="utf-8")
+    # The NAME may appear -- a comment explaining why not to use it is exactly what should stay.
+    # What must not come back is the dependency: resolving the alert type and branching on it.
+    assert "_META_ALERT" not in src, "back to an alert the default mask filters out"
+    assert 'getattr(lt, "metadata_received_alert"' not in src
+    assert "len(self._wanted_applied) < len(self._wanted)" in src, "nothing drives the apply"
+
+
+def test_a_narrowed_pin_reports_complete_when_its_one_file_is_done():
+    """A pin narrowed to one file leaves the rest at priority 0, so the torrent is never a full
+    seed. Keyed off is_seeding, such a download reported "downloading" for ever — progress 1.0,
+    state downloading, stuck in the Downloading shelf and never readable as complete. It is the
+    same is_finished-vs-is_seeding trap should_stop_seeding already documents.
+    """
+    import pathlib
+
+    from stremiosrv.torrent import engine as eng
+    src = pathlib.Path(eng.__file__).read_text(encoding="utf-8")
+    body = src[src.index("def pinned_status"):src.index("def add(", src.index("def pinned_status"))]
+    assert '"state": "seeding" if h.is_finished() else "downloading"' in body
+    assert "st.is_seeding" not in body, "back to whole-torrent seeding; a narrowed pin never is one"
+
+
+def test_playing_another_file_does_not_un_want_the_kept_one():
+    """Two files of one torrent are wanted at once: someone downloading an episode while someone
+    else streams another. A single wanted index could only resolve that by un-wanting one of them,
+    which sets it to priority 0 -- and libtorrent puts a priority-0 file's data in the partfile
+    rather than the file, so un-wanting does not merely stop a download, it throws it away.
+    """
+    from stremiosrv.torrent.engine import IDLE_FILE_PRIO, Handle
+
+    class RawHandle:
+        def __init__(self):
+            self.prios = None
+
+        def torrent_file(self):
+            class FS:
+                def num_files(self):
+                    return 5
+            class TI:
+                def files(self):
+                    return FS()
+            return TI()
+
+        def prioritize_files(self, prios):
+            self.prios = list(prios)
+
+        def set_sequential_download(self, on):
+            pass
+
+    raw = RawHandle()
+    h = Handle.__new__(Handle)
+    h._h = raw
+    h.pinned = False          # a download is NOT a pin any more
+    h.wanted = {3}            # the episode someone is downloading
+    h._focused_idx = None
+    h._read_pos = h._read_total = 0
+    h._prefetched = set()
+    h._active = 0
+
+    h.focus_file(1)           # somebody else plays a DIFFERENT episode of the same torrent
+    assert raw.prios[3] == IDLE_FILE_PRIO, "playing another file un-wanted the one being fetched"
+    assert raw.prios[1] == IDLE_FILE_PRIO
+    assert raw.prios[0] == 0 and raw.prios[4] == 0
+    assert h.wanted == {1, 3}, "playing a file must make it wanted too, exactly as downloading does"
+
+
+def test_an_old_download_pin_is_migrated_out_of_the_pin_registry(tmp_path):
+    """Downloads used to pin. Those records carry a `want`, and loading one as a pin would mean the
+    WHOLE torrent -- re-fetching every file of a pack that had been narrowed to one episode, and
+    handing it an eviction exemption the owner never asked for. Move them to the wanted registry.
+    """
+    import json as _json
+
+    from stremiosrv import pins as pinsmod
+    from stremiosrv import wanted as wantedmod
+    from stremiosrv.torrent.engine import Engine
+
+    root = str(tmp_path)
+    pinsmod.save_pins(root, [
+        {"infoHash": "a" * 40, "name": "", "trackers": [], "want": {"fileIdx": 4}},
+        {"infoHash": "b" * 40, "name": "kept-on-purpose", "trackers": []},
+    ])
+
+    eng = Engine.__new__(Engine)
+    eng._cache_root = root
+    eng._torrents = {}
+    eng._wanted, eng._wanted_applied = {}, set()
+    eng.add = lambda ih, trackers=None: type("H", (), {"pinned": False})()
+    eng._apply_pending_wanted = lambda: None
+    Engine.load_pins_into_session(eng)
+
+    assert eng._pinned == {"b" * 40}, "a download stayed pinned across the upgrade"
+    assert wantedmod.load(root) == {"a" * 40: [{"fileIdx": 4}]}
+    left = {e["infoHash"] for e in _json.loads((tmp_path / "pins.json").read_text())}
+    assert left == {"b" * 40}, "the download was left in the pin registry"
+
+
+def test_keeping_an_episode_does_not_start_fetching_its_whole_season():
+    """Pinning means "do not evict this". Expanding the wanted set turned a click that promised to
+    protect one episode into a fetch of the entire pack -- tens of gigabytes, and the card jumped
+    from Downloaded back to Downloading. A whole-title pin still means the whole torrent; a pin on
+    something already narrowed keeps exactly what was narrowed.
+    """
+    from stremiosrv.torrent.engine import IDLE_FILE_PRIO, Handle
+
+    class RawHandle:
+        def __init__(self):
+            self.prios = None
+
+        def torrent_file(self):
+            class FS:
+                def num_files(self):
+                    return 4
+            class TI:
+                def files(self):
+                    return FS()
+            return TI()
+
+        def prioritize_files(self, prios):
+            self.prios = list(prios)
+
+    raw = RawHandle()
+    h = Handle.__new__(Handle)
+    h._h = raw
+    h.wanted = {2}
+    h._focused_idx = None
+    h._active = 0
+
+    h.pinned = True
+    h.reapply_priorities()
+    assert raw.prios == [0, 0, IDLE_FILE_PRIO, 0], "keeping one episode wanted the whole pack"
+
+    # Nothing selected: a whole-title pin still means every file, as the appliance's pin does.
+    h.wanted = set()
+    h.reapply_priorities()
+    assert raw.prios == [1, 1, 1, 1]
+
+
+def test_names_episode_reads_the_forms_a_download_reads():
+    """The addon's episode pages read a file's name the way the download path does."""
+    from stremiosrv.pins import names_episode
+
+    assert names_episode("Show.S01E05.Title.1080p.mkv", 1, 5)
+    assert names_episode("Show 1x05 Title.mkv", 1, 5)
+    assert names_episode("Folder/Show.S01E05.mkv", 1, 5)
+    assert not names_episode("Show.S01E50.mkv", 1, 5)
+    assert not names_episode("Show.S02E05.mkv", 1, 5)
+    assert not names_episode("Some.Film.2019.1080p.mkv", 1, 5)

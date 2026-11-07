@@ -1,0 +1,105 @@
+# Direct-only development topology.
+name: stremioserverwebadmin
+services:
+  stremio-libtorrent-server:
+    image: stremioserverwebadmin-core:dev
+    container_name: stremio-libtorrent-server
+    restart: unless-stopped
+    dns:
+      - ${STREMIO_DNS_SERVER:?Host DNS unavailable; use start.sh}
+    environment:
+      STREMIOSRV_BT_LISTEN_PORT: ${STREMIOSRV_BT_LISTEN_PORT:-6881}
+      STREMIOSRV_HOST_MIN_FREE_GB: ${STREMIOSRV_HOST_MIN_FREE_GB:-10}
+      STREMIOSRV_HOST_MIN_FREE_PERCENT: ${STREMIOSRV_HOST_MIN_FREE_PERCENT:-10}
+      STREMIOSRV_CACHE_ROOT: /root/.stremio-server
+      STREMIOSRV_CACHE_OWNER_ID: stremio-libtorrent-server
+      STREMIOSRV_EXTERNAL_CONFIG: /config/admin-settings.json
+      CERT_FILE: ${CERT_FILE:-certificates.pem}
+      STREMIOSRV_CERT_FILE: ${CERT_FILE:-certificates.pem}
+      STREMIOSRV_TRANSCODE_IDLE_TIMEOUT: ${STREMIOSRV_TRANSCODE_IDLE_TIMEOUT:-30}
+      STREMIOSRV_TRANSCODE_GC_INTERVAL: ${STREMIOSRV_TRANSCODE_GC_INTERVAL:-10}
+      STREMIOSRV_TRANSCODE_GC_MAX_AGE: ${STREMIOSRV_TRANSCODE_GC_MAX_AGE:-600}
+      IPADDRESS: ${IPADDRESS:-}
+      SERVER_URL: ${SERVER_URL:-}
+      STREMIOSRV_LIBRARY_UI: ${STREMIOSRV_LIBRARY_UI:-true}
+      STREMIOSRV_LIBRARY_ALLOW_HTTP: ${STREMIOSRV_LIBRARY_ALLOW_HTTP:-false}
+      STREMIOSRV_LIBRARY_OWNER: ${STREMIOSRV_LIBRARY_OWNER:-}
+      STREMIOSRV_LIBRARY_ADDON_ALLOW: ${STREMIOSRV_LIBRARY_ADDON_ALLOW:-}
+      TRANSCODING_MODE: ${TRANSCODING_MODE:-auto}
+      TRANSCODING_HWACCEL: ${TRANSCODING_HWACCEL:-auto}
+      VAAPI_DEVICE: ${VAAPI_DEVICE:-}
+      TRANSCODING_VIDEO_QUALITY: ${TRANSCODING_VIDEO_QUALITY:-22}
+      TRANSCODING_AUDIO_CODEC: ${TRANSCODING_AUDIO_CODEC:-aac}
+      TRANSCODING_AUDIO_BITRATE: ${TRANSCODING_AUDIO_BITRATE:-192k}
+      TRANSCODING_COPY_VIDEO: ${TRANSCODING_COPY_VIDEO:-true}
+      TRANSCODING_COPY_AUDIO: ${TRANSCODING_COPY_AUDIO:-true}
+      TRANSCODING_DIRECT_VIDEO_CODECS: ${TRANSCODING_DIRECT_VIDEO_CODECS:-h264}
+      TRANSCODING_DIRECT_AUDIO_CODECS: ${TRANSCODING_DIRECT_AUDIO_CODECS:-aac,mp3,ac3}
+      TRANSCODING_FALLBACK_CODEC: ${TRANSCODING_FALLBACK_CODEC:-libx264}
+      TRANSCODING_HW_DECODE: ${TRANSCODING_HW_DECODE:-false}
+    volumes:
+    - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
+    - stremio-config:/config:ro
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -fsS
+      - http://127.0.0.1:11470/health
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+    - ${IPADDRESS:?IP required}:8080:8080
+    - ${IPADDRESS:?IP required}:11470:11470
+    - ${IPADDRESS:?IP required}:12470:12470
+    - ${IPADDRESS:?IP required}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/tcp
+    - ${IPADDRESS:?IP required}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/udp
+    networks:
+    - stremio-net
+  webadmin:
+    image: stremioserverwebadmin-webadmin:dev
+    container_name: stremio-webadmin
+    restart: unless-stopped
+    dns:
+      - ${STREMIO_DNS_SERVER:?Host DNS unavailable; use start.sh}
+    environment:
+      WEBADMIN_STATE: /data
+      STREMIO_CONFIG_FILE: /config/admin-settings.json
+      STREMIO_URL: http://stremio-libtorrent-server:11470
+      STREMIO_CONTAINER: stremio-libtorrent-server
+      STREMIO_IMAGE: stremioserverwebadmin-core:dev
+      WEBADMIN_IMAGE: stremioserverwebadmin-webadmin:dev
+      STREMIO_SOURCE_REPO: https://github.com/emanique/StremioServerWebAdmin
+      STREMIO_SOURCE_BRANCH: ${STREMIO_SOURCE_BRANCH:-main}
+      STREMIO_RUNTIME_BRANCH: ${STREMIO_RUNTIME_BRANCH:-${STREMIO_SOURCE_BRANCH:-main}}
+      STREMIO_TARGET_SERVER_VERSION: ${STREMIO_TARGET_SERVER_VERSION:-1.6.34}
+      STREMIO_UPDATE_HEALTH_TIMEOUT: ${STREMIO_UPDATE_HEALTH_TIMEOUT:-180}
+      IPADDRESS: ${IPADDRESS:-localhost}
+      WEB_PLAYER_URL: http://${IPADDRESS:-localhost}:8080
+      SERVER_URL: http://${IPADDRESS:-localhost}:11470
+    ports:
+    - ${WEBADMIN_BIND_IP:-127.0.0.1}:8090:8090
+    volumes:
+    - webadmin-data:/data
+    - stremio-config:/config
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /var/lib/stremio-webadmin/port-status.json:/var/lib/stremio-webadmin/port-status.json:ro
+    networks:
+    - stremio-net
+    depends_on:
+      stremio-libtorrent-server:
+        condition: service_healthy
+    build:
+      context: ./webadmin
+      dockerfile: Dockerfile
+networks:
+  stremio-net:
+    driver: bridge
+volumes:
+  stremio-cache: null
+  stremio-config: null
+  webadmin-data: null

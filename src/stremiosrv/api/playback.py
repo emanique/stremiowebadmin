@@ -1,0 +1,312 @@
+import re
+import time
+
+from fastapi import APIRouter, Body, Request, Response
+from fastapi.responses import StreamingResponse
+
+from stremiosrv.pins import guess_file_idx
+from stremiosrv.stream.fileserver import content_type_for, wait_and_read
+from stremiosrv.stream.ranges import parse_range
+from stremiosrv.torrent.trackers import sources_to_trackers
+
+router = APIRouter()
+
+DLNA_HEADERS = {
+    "transferMode.dlna.org": "Streaming",
+    "contentFeatures.dlna.org": (
+        "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+    ),
+}
+
+
+def serialize_stats(handle, idx: int | None = None) -> dict:
+    """Map a libtorrent handle to the captured /:infoHash/stats.json schema.
+
+    With idx, adds the per-file fields (streamProgress/streamName/streamLen). Only called
+    with a real handle (Stage 2 Task 6 wiring); kept here so the shape lives in one place.
+    """
+    st = handle.status()
+    ti = handle.torrent_file()
+    wires, unchoked = handle.peer_wires()
+    files = []
+    if ti:
+        fs = ti.files()
+        for i in range(fs.num_files()):
+            files.append({
+                "path": fs.file_path(i), "name": fs.file_name(i),
+                "length": fs.file_size(i), "offset": fs.file_offset(i),
+            })
+    # stream_* are REQUIRED top-level by stremio-core's Statistics struct (defaults; per-file below).
+    stream_len, stream_name, stream_progress = 0, "", 0.0
+    if idx is not None and ti:
+        flen = ti.files().file_size(idx)
+        stream_len = flen
+        stream_name = ti.files().file_name(idx)
+        stream_progress = (st.total_done / flen) if flen else 0.0
+    return {
+        "infoHash": str(st.info_hashes.v1), "name": (ti.name() if ti else ""),
+        "peers": st.num_peers, "unchoked": unchoked, "queued": 0, "unique": st.num_peers,
+        # `queued`, `connectionTries` and `swarmPaused` are CONSTANTS, present only because the stock
+        # server's schema has them and stremio-core parses the whole object or none of it. libtorrent
+        # exposes no equivalent counter, so they are not diagnostics — do not read peering health out
+        # of them. A `connectionTries: 0` next to a live `swarmSize` looks like the engine has stopped
+        # dialling out; it means nothing at all, and it has already cost one wrong diagnosis.
+        # The real peering signals in this payload are `peers`/`swarmConnections` (st.num_peers,
+        # currently connected) and `swarmSize` (st.list_peers, known of) — plus /netcheck.json.
+        "connectionTries": 0, "swarmPaused": False,
+        "swarmConnections": st.num_peers, "swarmSize": st.list_peers,
+        "selections": [], "wires": wires, "files": files,
+        "downloaded": st.total_done, "uploaded": st.total_upload,
+        "downloadSpeed": st.download_rate, "uploadSpeed": st.upload_rate,
+        "sources": [], "peerSearchRunning": True,
+        "streamLen": stream_len, "streamName": stream_name, "streamProgress": stream_progress,
+        # opts MUST be a fully-populated Options object or stremio-core fails to parse the whole
+        # stats response (-> blank Statistics panel). Values are nominal; the panel doesn't show them.
+        "opts": {
+            "connections": 400, "dht": True, "tracker": True, "virtual": True,
+            "path": "", "handshakeTimeout": 5000, "timeout": 2000,
+            "growler": {"flood": 0, "pulse": 52428800},
+            "peerSearch": {"min": 40, "max": 150, "sources": []},
+            "swarmCap": {"maxSpeed": 12582912, "minPeers": 20},
+        },
+    }
+
+
+def serialize_active(handle) -> dict:
+    """Compact 'now playing' entry for the active-streams list (lighter than the full stats shape)."""
+    st = handle.status()
+    ti = handle.torrent_file()
+    return {
+        "infoHash": str(st.info_hashes.v1),
+        "name": ti.name() if ti else "",
+        "downloadSpeed": st.download_rate,
+        "uploadSpeed": st.upload_rate,
+        "peers": st.num_peers,
+        "downloaded": st.total_done,
+        "uploaded": st.total_upload,
+        "progress": round(st.progress, 4),  # overall torrent completion, 0..1
+        # Which torrent is actually being played (open stream) vs merely downloading — so the card can
+        # LABEL it instead of guessing from throughput. paused = seeding stopped by the seed policy.
+        "active": bool(handle.is_active()),
+        "paused": bool(handle.is_paused()),
+    }
+
+
+def _engine(request: Request):
+    return getattr(request.app.state, "engine", None)
+
+
+def _playback_registry(request: Request):
+    return getattr(request.app.state, "playback_registry", None)
+
+
+# How long a request waits for a torrent's metadata before answering 504. Read at call time, so a
+# test can shorten it.
+METADATA_TIMEOUT = 30
+_INFOHASH = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def _handle(eng, info_hash: str, trackers: list[str]):
+    """The running torrent, or a new one -- given the client's trackers either way."""
+    h = eng.get(info_hash)
+    if h is None:
+        h = eng.add(info_hash, trackers=trackers or None)  # lazy create (also injects defaults/env/live)
+    elif trackers:
+        h.add_trackers(trackers)  # already running: fold in any newly-supplied trackers
+    return h
+
+
+def _await_metadata(h) -> bool:
+    """Wait up to METADATA_TIMEOUT for the torrent's file list; False when it never came."""
+    deadline = time.time() + METADATA_TIMEOUT
+    while not h.has_metadata() and time.time() < deadline:
+        time.sleep(0.2)
+    return h.has_metadata()
+
+
+def _guess(h, want: dict | None) -> int:
+    """pins.guess_file_idx over this torrent's files. Needs the metadata."""
+    return guess_file_idx([(p, h.file_size(i)) for i, p in enumerate(h.file_paths())], want)
+
+
+@router.get("/active.json")
+def active_streams(request: Request) -> list:
+    """Torrents currently loaded — the owner's own activity on their own box, for the appliance
+    'Active streams' card. Content-neutral: names only, no media artwork/sources."""
+    eng = _engine(request)
+    if eng is None:
+        return []
+    return [serialize_active(h) for h in eng.active()]
+
+
+@router.get("/{info_hash}/stats.json")
+def torrent_stats(info_hash: str, request: Request):
+    eng = _engine(request)
+    h = eng.get(info_hash) if eng else None
+    return serialize_stats(h) if h else None
+
+
+@router.get("/{info_hash}/{idx:int}/stats.json")
+def file_stats(info_hash: str, idx: int, request: Request):
+    eng = _engine(request)
+    h = eng.get(info_hash) if eng else None
+    return serialize_stats(h, idx) if h else None
+
+
+@router.get("/removeAll")
+def remove_all(request: Request) -> dict:
+    eng = _engine(request)
+    if eng is not None:
+        eng.remove_all()
+    return {"ok": True}
+
+
+@router.get("/{info_hash}/remove")
+def remove(info_hash: str, request: Request) -> dict:
+    eng = _engine(request)
+    if eng is not None:
+        eng.remove(info_hash)
+    return {"ok": True}
+
+
+@router.api_route("/{info_hash}/create", methods=["GET", "POST"])
+def create(info_hash: str, request: Request, body: dict | None = Body(None)):
+    """Start a torrent and say which of its files to play -- the player's call before streaming.
+
+    stremio-video makes it whenever an addon's stream carries `sources` or no `fileIdx`, then plays
+    /<ih>/<guessedFileIdx>?tr=<each source>; any non-2xx answer is fatal to that playback. Until
+    1.6.4 there was no such route (404 here, 405 through nginx), so every such stream failed to
+    start. stremio-core also calls it, without a guess, for a magnet opened in the app.
+
+    The contract of server.js `router.all("/:infoHash/create")`: the body carries the trackers
+    (`peerSearch.sources`) and, as `guessFileIdx`, whether to choose a file -- `{}` or
+    `{season, episode}` to ask, `false` when the client holds its own index. The answer is the
+    torrent's stats once its metadata is here, plus `guessedFileIdx` when one was asked for.
+    """
+    if not _INFOHASH.match(info_hash):
+        return Response(status_code=400, content=b"invalid info hash")
+    eng = _engine(request)
+    if eng is None:
+        return Response(status_code=503, content=b"engine unavailable")
+    body = body or {}
+    peer_search = body.get("peerSearch")
+    sources = peer_search.get("sources") if isinstance(peer_search, dict) else None
+    h = _handle(eng, info_hash.lower(), sources_to_trackers(sources))
+    if not _await_metadata(h):
+        return Response(status_code=504, content=b"metadata timeout")
+    stats = serialize_stats(h)
+    want = body.get("guessFileIdx")
+    if isinstance(want, dict):  # `{}` asks too: the client tests the field for truth, not keys
+        stats["guessedFileIdx"] = _guess(h, want)
+    return stats
+
+
+@router.api_route("/{info_hash}/-1", methods=["GET", "HEAD"])
+def serve_guessed(info_hash: str, request: Request):
+    """The byte-range stream of the file this torrent would be played for.
+
+    stremio-core writes -1 as the index of a stream that has none, in the URLs it builds for
+    external players and downloads, and server.js reads it as "choose for me": GuessFileIdx with no
+    episode, i.e. the largest media file. Starlette's int convertor takes no sign, so it takes this
+    literal route to catch it; without one the request 404'd here and got index.html via nginx.
+    """
+    return serve(info_hash, -1, request)
+
+
+@router.api_route("/{info_hash}/{idx:int}", methods=["GET", "HEAD"])
+def serve(info_hash: str, idx: int, request: Request):
+    """Byte-range file streaming with lazy engine create + deadline-driven playhead focus."""
+    eng = _engine(request)
+    if eng is None:
+        return Response(status_code=503, content=b"engine unavailable")
+    # Client-supplied: after create, Stremio repeats an addon's `sources` here in their peer-search
+    # form (tracker:<url>, dht:<ih>), which sources_to_trackers turns back into announce URLs.
+    trackers = sources_to_trackers(request.query_params.getlist("tr"))
+    h = _handle(eng, info_hash, trackers)
+    if not _await_metadata(h):
+        return Response(status_code=504, content=b"metadata timeout")
+    if idx < 0:  # /<ih>/-1, see serve_guessed
+        idx = _guess(h, {})
+        if idx < 0:
+            return Response(status_code=404, content=b"no media file in this torrent")
+
+    # Concurrent-stream cap: count distinct torrents being watched. A new connection to an
+    # already-playing torrent (e.g. a seek) doesn't count against the limit.
+    max_streams = request.app.state.settings.max_streams
+    if max_streams and not h.is_active() and eng.active_torrent_count() >= max_streams:
+        return Response(status_code=503, content=b"max concurrent streams reached")
+
+    h.focus_file(idx)        # download the full played file (not other files in a pack); seek-friendly
+    h.refocus()              # a new request (often a seek) -> drop the previous window's deadlines
+    total = h.file_size(idx)
+    start, end = parse_range(request.headers.get("Range"), total)
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Range": f"bytes {start}-{end}/{total}",
+        "Content-Length": str(end - start + 1),
+        # Without a media type the browser <video> refuses the stream ("video not supported");
+        # mpv/desktop ignore it. Derive from the file extension.
+        "Content-Type": content_type_for(h.file_path(idx)),
+        **DLNA_HEADERS,
+    }
+    if request.method == "HEAD":
+        return Response(status_code=206, headers=headers)
+
+    # The sliding boost window (in wait_and_read) concentrates bandwidth on the playhead.
+    settings = request.app.state.settings
+    readahead = settings.readahead_bytes
+
+    def tracked_stream():
+        # Mark the torrent active for the life of the stream so its played file gets full download
+        # priority AND idle torrents get throttled (engine.note_stream_open re-applies the
+        # cross-torrent bandwidth policy); on close (normal end, client disconnect, or error) demote
+        # + lift the throttle. finally covers GeneratorExit on disconnect.
+        #
+        # The read cursor is recorded here rather than inside wait_and_read: that function must
+        # never raise into the ASGI layer, and every one of its test fakes would need the new
+        # method. Here `h` is always a real Handle from the engine.
+        #
+        # The loop below is manual (not `yield from`) so it can record the cursor per chunk, but
+        # that trades away a guarantee `yield from` gave for free: structural, deterministic closing
+        # of the delegated sub-generator when this generator is torn down early (client disconnect,
+        # truncation). A bare `for chunk in stream: yield chunk` relies on CPython's refcounting to
+        # close `stream` promptly -- which holds only as long as nothing else keeps a reference to
+        # it (a logging wrapper, a debug hook, an instrumentation decorator). The explicit close
+        # below makes the guarantee structural again instead of an implementation-detail accident.
+        # `.close()` on an already-exhausted generator is a documented no-op, so this costs nothing
+        # on the normal-completion path.
+        eng.note_stream_open(h)
+        registry = _playback_registry(request)
+        session_id = (
+            registry.open_source(info_hash, idx, request.headers.get("User-Agent"))
+            if registry is not None else None
+        )
+        try:
+            pos = start
+            stream = wait_and_read(
+                eng.save_path(), h, idx, start, end, window_bytes=readahead,
+                timeout=settings.stream_piece_timeout,
+                first_timeout=settings.stream_first_piece_timeout,
+                # Logged only, so a stream that dies names its torrent instead of just a piece
+                # number — which is the difference between "one title is starved" and "the box is".
+                info_hash=info_hash,
+                # FFmpeg (Lavf) feeds our HLS transcoder. Ending this long range at a temporary
+                # torrent gap is interpreted as EOF and leaves the browser looping the last HLS
+                # segments. Keep only that internal source open while verified pieces catch up.
+                keep_waiting=(request.headers.get("User-Agent", "").startswith("Lavf/")),
+            )
+            try:
+                for chunk in stream:
+                    pos += len(chunk)
+                    h.note_read_position(pos, total)
+                    if registry is not None and session_id is not None:
+                        registry.note_bytes(session_id, len(chunk))
+                    yield chunk
+            finally:
+                stream.close()
+        finally:
+            if registry is not None and session_id is not None:
+                registry.close_source(session_id)
+            eng.note_stream_close(h)
+
+    return StreamingResponse(tracked_stream(), status_code=206, headers=headers)

@@ -1,0 +1,14 @@
+# NVIDIA GPU overlay.
+# Apply only when the NVIDIA container runtime is available.
+#
+#   GPU_BACKEND=nvidia sh start.sh
+#
+# NVIDIA devices are injected by the NVIDIA Container Toolkit.
+# Do not expose /dev/dri here: VAAPI is a separate backend.
+
+services:
+  stremio-libtorrent-server:
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all

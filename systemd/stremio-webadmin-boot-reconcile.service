@@ -1,0 +1,14 @@
+[Unit]
+Description=Verify Stremio GPU and BT bindings after host boot
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/stremio-server-webadmin/workspace/StremioServerWebAdmin
+ExecStart=/usr/bin/python3 /opt/stremio-server-webadmin/workspace/StremioServerWebAdmin/scripts/boot-gpu-reconcile.py
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

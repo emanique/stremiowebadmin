@@ -1,0 +1,10 @@
+# Copy to /etc/stremio-webadmin/port-sync.conf after registering THIS host.
+# Default 0 safely disables port changes until approved.
+ENABLED=0
+POLICY_ID=replace-with-221-host-policy-id
+HOST_MAC=replace-with-host-egress-interface-mac
+GATEWAY_IP=replace-with-host-current-gateway-ip
+API_PORT=9443
+API_PATH=/api/v1/port-forward/desired
+CA_FILE=/etc/stremio-webadmin/gateway-ca.crt
+TOKEN_FILE=/etc/stremio-webadmin/gateway-status.token

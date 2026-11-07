@@ -1,0 +1,403 @@
+"""One payload describing everything the box is holding, for the page to render.
+
+Three sources are merged: what is on disk (cache.scan_cache), what is pinned and live in the engine
+(engine.pinned_status), and what we know the titles of (labels.json).
+
+**Everything on disk is returned, labelled or not.** The page renders unlabelled entries in their
+own section. A view that showed only recognised titles would let the disk fill invisibly, which is
+exactly the failure the fail-loud rule exists to prevent.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import re
+import stat
+
+from stremiosrv import cache as cachemod
+from stremiosrv.library import labels as labelsmod
+from stremiosrv.library import torrentfiles
+from stremiosrv.stream.fileserver import is_video
+
+log = logging.getLogger(__name__)
+
+# libtorrent writes `.<infohash>.parts` beside the data of a partially-downloaded torrent. It is
+# engine bookkeeping, not something the owner downloaded: shown as its own card it invites a delete
+# that corrupts the torrent it belongs to. Its bytes are real though, so they are attributed to the
+# entry they belong to rather than dropped -- silently under-reporting disk use is the failure this
+# whole view exists to prevent.
+_PARTFILE_RE = re.compile(r"^\.([0-9a-fA-F]{40})\.parts$")
+
+# Below both of these, what is on disk for a file is boundary spill from its neighbours rather
+# than something worth naming. A file the owner actually asked for is always listed, however
+# little of it has arrived -- a download that has just started is not a scrap.
+FRAGMENT_BYTES = 64 * 1024 * 1024
+FRAGMENT_FRACTION = 0.02
+
+
+
+def is_watchable(f: dict) -> bool:
+    """Whether this file is something someone could actually watch, rather than boundary spill.
+
+    A piece straddles the boundary between two files, so fetching one leaves kilobytes -- sometimes
+    a few megabytes -- of its neighbours behind. Named here rather than inlined because the addon
+    asks the same question about the same files: an episode offered on the strength of 11 MB of
+    spill is a stream that stalls on the first seek.
+    """
+    return bool(f.get("wanted")) or (f.get("downloaded") or 0) >= FRAGMENT_BYTES         or (f.get("progress") or 0) >= FRAGMENT_FRACTION
+
+
+def _disk_files(cache_root: str, name: str, live: list[dict] | None = None) -> list[dict]:
+    """Per-file facts read from the DISK, for a torrent the session is not tracking.
+
+    Only pins are re-added to the libtorrent session at startup, so after any restart everything
+    else -- which is most of the cache -- has no handle, and per-file facts came only from a
+    handle. A season pack then collapsed back into one card carrying the PACK's name and the whole
+    directory's size, which says nothing about which episode is actually there. Restarting is not
+    an unusual state: changing any setting on the appliance restarts the container.
+
+    The files are on the disk either way. `cache.data_bytes` is what makes this honest --
+    libtorrent allocates the whole torrent sparsely, so `st_size` reports what a file WILL be while
+    its holes say what has not arrived yet. Not the allocation: a compressing filesystem stores a
+    finished file in less space than its length, and a complete episode read as 99.8%.
+
+    `live` is the session's own list for this torrent when it holds the torrent without tracking
+    it -- playback filling a title is the usual case (Engine.live_files). A file on that list may
+    be being written right now, and its holes are the one thing the disk cannot be asked about
+    cheaply or reliably while it is, so its byte count comes from the handle instead. Only that
+    number changes source: the listing is still the disk's, with no index and nothing wanted.
+    Matched on name AND size, because a handle names a file by its last path segment only.
+    """
+    arrived = {(f.get("name"), f.get("size")): f.get("downloaded") or 0 for f in live or []}
+    base = os.path.join(cache_root, name)
+    if not os.path.isdir(base):
+        return []
+    out: list[dict] = []
+    for dirpath, _dirs, files in os.walk(base):
+        for fn in sorted(files):
+            if not is_video(fn):
+                continue
+            path = os.path.join(dirpath, fn)
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            key = (fn, st.st_size)
+            got = arrived[key] if key in arrived else cachemod.data_bytes(path, st)
+            out.append({
+                # No index: a directory listing cannot know the torrent's own file order, and
+                # inventing one would let a release's fileIdx match the wrong episode.
+                "index": None,
+                "name": fn,
+                "size": st.st_size,
+                "downloaded": got,
+                "progress": round(got / st.st_size, 4) if st.st_size else 0.0,
+                # Never wanted here: a handle can exist -- playback fills an untracked title --
+                # but its `wanted` is only the file being played, which the page would read as a
+                # download. Only the byte count above is taken from it.
+                "wanted": False,
+            })
+    return out
+
+
+def _torrent_files(cache_root: str, name: str, info_hash: str,
+                   live: list[dict] | None) -> tuple[list[dict], int, int] | None:
+    """The torrent's OWN video files, its file count and how many videos it holds, for a torrent
+    the session is not tracking -- or None when no resume record finds any of them, and the disk
+    is all there is (see _disk_files).
+
+    A directory listing has names and sizes but no torrent file indices, and nothing at all for a
+    torrent that is one bare file at the cache root. The addon then offered no episode of a pack --
+    a real pack numbered its files E06, E02, E03, E04, E05, E01, E07, E08, so any order-based
+    guess plays the wrong one -- and could never learn or offer a single-file release.
+
+    The resume record gives each file's index, path and length. Only videos are listed, as the
+    walk lists them: a subtitle or a link file drew a card of its own, and one that was complete
+    was offered in place of a video still arriving. The videos are counted from the record, here
+    or not: a torrent of one video can only mean that one, whatever its name says (see
+    addon_model._label_alone_names_the_file). A file the session holds is counted by its
+    handle, matched on that index -- it may be being written, and its holes are what the disk
+    cannot be asked about cheaply (see _disk_files). Every other file is measured on the disk, and
+    one whose length there is not the torrent's belongs to something else. A file libtorrent wrote
+    under another name than the record's (invalid UTF-8, a part too long, a duplicate) is missing
+    from the list. The walk answers when the record finds none of
+    its videos on the disk -- renamed, or nothing has arrived yet: an empty list reads as a
+    single-file torrent's, whose one answer is index 0 -- and for a brand-new torrent, which has
+    no record until the engine's next save (every 30 s by default). Either way a single file at
+    the root, which has no directory to walk, is listed from the session's own record instead:
+    see _fresh_single_file.
+    """
+    base = os.path.join(cache_root, name)
+    resume = torrentfiles.listing(cache_root, info_hash) if info_hash else None
+    if resume is None:
+        return _fresh_single_file(base, name, live)
+    held = {f.get("index"): f for f in live or [] if isinstance(f.get("index"), int)}
+    out: list[dict] = []
+    videos = 0
+    for tf in resume.files:
+        fname = tf.parts[-1] if tf.parts else name
+        if not is_video(fname):
+            continue
+        videos += 1
+        path = os.path.join(base, *tf.parts)
+        try:
+            st = os.stat(path)
+        except (OSError, ValueError):  # ValueError: a name no path can carry, a NUL byte in it
+            continue
+        if not stat.S_ISREG(st.st_mode) or st.st_size != tf.size:
+            continue
+        seen = held.get(tf.index)
+        got = (seen.get("downloaded") or 0) if seen else cachemod.data_bytes(path, st)
+        if not got:
+            continue
+        out.append({
+            "index": tf.index,
+            "name": fname,
+            "size": tf.size,
+            "downloaded": got,
+            "progress": round(got / tf.size, 4) if tf.size else 0.0,
+            "wanted": False,
+        })
+    return (out, resume.count, videos) if out else _fresh_single_file(base, name, live)
+
+
+def _fresh_single_file(base: str, name: str,
+                       live: list[dict] | None) -> tuple[list[dict], int, int] | None:
+    """The session's own record for a single file at the cache root that its resume record does not
+    list yet: no record is saved yet, or none of the file's bytes has arrived.
+
+    Such a torrent has no directory to walk, so without this it would have no listing at all
+    until then -- and the player's first request, which is what teaches the library what the
+    file is, would find nothing to match. Only one record, of this name, whose
+    length the file on disk has, and only a video's, as everywhere else in the listing; its
+    `wanted` is only playback's focus and is dropped. The count stays unknown (0), so the page
+    does not treat the list as the torrent's whole one.
+    """
+    if not live or len(live) != 1 or live[0].get("name") != name:
+        return None
+    if not is_video(name):
+        return None
+    try:
+        st = os.stat(base)
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode) or st.st_size != live[0].get("size"):
+        return None
+    return [dict(live[0], wanted=False)], 0, 1  # one video, however little of it is here
+
+
+def _engine_view(engine) -> tuple[dict, dict, dict, dict]:
+    """(name -> infohash, infohash -> tracked status, infohash -> live per-file list, infohash ->
+    held status). Never raises: the engine is allowed to be absent or briefly broken, and a
+    listing of the disk is still worth serving when it is."""
+    if engine is None:
+        return {}, {}, {}, {}
+    try:
+        names = {n: h.lower() for n, h in (engine.name_to_hash() or {}).items()}
+    except Exception as e:  # noqa: BLE001 — degrade to a disk-only listing
+        log.warning("library: name_to_hash failed: %s: %s", type(e).__name__, e)
+        names = {}
+    try:
+        # tracked, not pinned: a download in flight is not pinned any more, and reading only the
+        # pins would leave it invisible until its bytes reached the disk.
+        pins = {p["infoHash"].lower(): p for p in (engine.tracked_status() or [])
+                if p.get("infoHash")}
+    except Exception as e:  # noqa: BLE001 — degrade to a disk-only listing
+        log.warning("library: pinned_status failed: %s: %s", type(e).__name__, e)
+        pins = {}
+    try:
+        # Every torrent in the session, tracked or not: the files playback is filling are the
+        # ones being written, and their byte counts must come from here (see _disk_files).
+        live = {ih.lower(): files for ih, files in (engine.live_files() or {}).items()}
+    except Exception as e:  # noqa: BLE001 — degrade to measuring them on the disk
+        log.warning("library: live_files failed: %s: %s", type(e).__name__, e)
+        live = {}
+    try:
+        # Whether each torrent the session holds untracked is still arriving: playback fills one
+        # without the library tracking it (see Engine.held_status).
+        held = {ih.lower(): s for ih, s in (engine.held_status() or {}).items()}
+    except Exception as e:  # noqa: BLE001 — degrade to reading progress off the disk
+        log.warning("library: held_status failed: %s: %s", type(e).__name__, e)
+        held = {}
+    return names, pins, live, held
+
+
+def _untracked_view(held: dict | None, listed: list[dict]) -> dict:
+    """State and progress for a torrent nobody tracks.
+
+    This said "idle, complete" for every one of them, on the reasoning that nothing was
+    downloading them. Playback does, and since titles are labelled at playback such a torrent can
+    be the owner's: a film the player was 45% into sat on the Downloaded shelf as "complete".
+    From the session while it holds the torrent -- "streaming" while it is still arriving, idle
+    once it is not. Otherwise from what its own files hold on the disk, leaving out the spill a
+    neighbouring file's pieces leave behind (is_watchable), or a finished episode would read as a
+    fraction of its season for good. Complete only when nothing is known at all, as before.
+    """
+    if held is not None:
+        view = {k: held.get(k, 0) for k in ("progress", "downloadSpeed", "uploadSpeed",
+                                             "peers", "seeds")}
+        view["state"] = "streaming" if held.get("state") == "downloading" else "idle"
+        view["playing"] = bool(held.get("playing"))
+        return view
+    files = [f for f in listed if is_watchable(f)]
+    size = sum(f.get("size") or 0 for f in files)
+    have = sum(f.get("downloaded") or 0 for f in files)
+    return {"state": "idle", "progress": round(have / size, 4) if size else 1.0}
+
+
+def build(cache_root: str, engine, budget: int = 0) -> dict:
+    names, pins, live, in_session = _engine_view(engine)
+    idle = cachemod.load_name_index(cache_root)
+    all_labels = labelsmod.load(cache_root)
+    entries: list[dict] = []
+    seen: set[str] = set()
+
+    items = cachemod.scan_cache(cache_root)
+    part_bytes: dict[str, int] = {}
+    for item in items:
+        m = _PARTFILE_RE.match(item["name"])
+        if m:
+            part_bytes[m.group(1).lower()] = part_bytes.get(m.group(1).lower(), 0) + item["size"]
+
+    for item in items:
+        name = item["name"]
+        if _PARTFILE_RE.match(name):
+            continue  # folded into its torrent below, or surfaced as an orphan at the end
+        ih = (names.get(name) or idle.get(name) or "").lower()
+        pin = pins.get(ih, {})
+        if ih:
+            seen.add(ih)
+        # A tracked torrent (kept or downloading) lists its files from the engine: what is wanted
+        # as well as what is present. Anything else lists the torrent's own files where the
+        # session or a resume record knows them (see _torrent_files), and the disk otherwise.
+        engine_files = pin.get("files") or []
+        own = None if engine_files else _torrent_files(cache_root, name, ih, live.get(ih))
+        num_videos = None
+        if engine_files:
+            listed, num_files, source = engine_files, pin.get("numFiles") or 0, "engine"
+        elif own is not None:
+            listed, num_files, num_videos = own
+            # The page reads anything but "disk" as the torrent's whole list, and its single-file
+            # shortcut needs the count -- which only the resume record carries.
+            source = "resume" if num_files else ("disk" if listed else None)
+        else:
+            listed, num_files = _disk_files(cache_root, name, live.get(ih)), 0
+            source = "disk" if listed else None
+        view = pin or _untracked_view(in_session.get(ih) if ih else None, listed)
+        entries.append({
+            "name": name,
+            "infoHash": ih or None,
+            "size": item["size"] + part_bytes.pop(ih, 0) if ih else item["size"],
+            "mtime": item["mtime"],
+            # Kept, not merely present: the record says so now, because being tracked no longer
+            # implies being pinned.
+            "pinned": bool(pin.get("pinned")),
+            # /library/api/remove is keyed by infohash; without one the button would do nothing.
+            "removable": bool(ih),
+            # A tracked torrent reports its own; an untracked one reads it off the session or the
+            # disk (see _untracked_view).
+            "progress": view.get("progress", 1.0),
+            # The one file a narrowed pin fetches, when it is narrower than the torrent.
+            "wantedFile": pin.get("wantedFile"),
+            # What this torrent holds or wants, per file, and how many files it has in all.
+            # Distinct from `children` below on purpose: `children` is the subset worth drawing as
+            # its own card, while these are the facts a caller matches against -- which is what
+            # tells a release for episode 6 apart from the episode 5 the torrent is busy with.
+            "files": listed,
+            "numFiles": num_files,
+            # How many videos the torrent holds, from its own record -- None where only the engine
+            # or the disk knows the files. One video can only be the file a label means, whatever
+            # its name says: see addon_model._label_alone_names_the_file.
+            "numVideos": num_videos,
+            # Where those facts came from. A disk listing has no file indices and cannot know how
+            # many files the TORRENT has -- only how many have landed -- so a caller must not read
+            # it as though it were the torrent's own list.
+            "filesFrom": source,
+            "state": view.get("state", "idle"),
+            "peers": view.get("peers", 0),
+            "seeds": view.get("seeds", 0),
+            "downloadSpeed": view.get("downloadSpeed", 0),
+            "uploaded": pin.get("uploaded", 0),
+            "ratio": pin.get("ratio", 0.0),
+            "uploadSpeed": view.get("uploadSpeed", 0),
+            # A stream is open on it right now, as opposed to filling in the background.
+            "playing": view.get("playing", False),
+            "label": all_labels.get(ih) if ih else None,
+        })
+        # A pack holds several episodes, arriving from different places -- one downloaded here,
+        # another streamed by the player, possibly by different people. One entry per torrent
+        # could not say that, so the disk grew with nothing on the page accounting for it. Split
+        # the entry into the files it actually holds, keeping the torrent entry as their parent.
+        # A piece straddles the boundary between two files, so fetching one leaves kilobytes --
+        # occasionally a few megabytes -- of its neighbours behind. Those are not episodes anyone
+        # has, and listing them as though they were is the same lie as hiding the real ones, told
+        # the other way round. Show what someone could actually watch; account for the rest in one
+        # line rather than dropping it, because unattributed disk is what this view exists to stop.
+        held = [f for f in listed if f.get("downloaded")]
+        files = [f for f in held if is_watchable(f)]
+        scraps = [f for f in held if f not in files]
+        # One file is worth a card too when the list is not the engine's: the entry is named after
+        # the TORRENT, so a pack holding a single episode otherwise shows the season's name and
+        # nothing that says which episode it is. Not when the card would only repeat the entry's
+        # name: a single-file torrent's entry IS its one file, whether or not its resume record
+        # has been saved yet -- so the file count cannot be what decides it.
+        if len(files) > 1 or (files and scraps) or (files and not engine_files
+                                                     and files[0]["name"] != name):
+            parent = entries[-1]
+            if scraps:
+                parent["scraps"] = {"count": len(scraps),
+                                    "size": sum(f["downloaded"] for f in scraps)}
+            parent["children"] = [{
+                "name": f["name"],
+                "infoHash": ih,
+                "fileIdx": f["index"],
+                "size": f["downloaded"],
+                "progress": f["progress"],
+                "wanted": f.get("wanted", False),
+                "pinned": parent["pinned"],
+                # Removal is still per-torrent: these share one handle and one directory, so
+                # deleting one would have to stop the torrent the others are being read from.
+                "removable": False,
+            } for f in files]
+
+    # A pin whose files have not landed yet has no cache directory. Without this the UI shows
+    # nothing after a download is started and the click looks like it did nothing.
+    for ih, pin in pins.items():
+        if ih in seen:
+            continue
+        entries.append({
+            "name": pin.get("name", ""), "infoHash": ih, "size": 0, "mtime": 0,
+            "pinned": bool(pin.get("pinned")), "progress": pin.get("progress", 0.0),
+            "wantedFile": pin.get("wantedFile"),
+            "files": pin.get("files") or [], "numFiles": pin.get("numFiles") or 0,
+            "state": pin.get("state", "downloading"), "peers": pin.get("peers", 0),
+            "seeds": pin.get("seeds", 0), "downloadSpeed": pin.get("downloadSpeed", 0),
+            "uploaded": pin.get("uploaded", 0), "ratio": pin.get("ratio", 0.0),
+            "uploadSpeed": pin.get("uploadSpeed", 0), "label": all_labels.get(ih),
+            "removable": True,
+        })
+
+    # Partfiles whose torrent is no longer on disk. They still occupy space -- one on a real box
+    # held 30 GB -- so hiding them would recreate the invisible-disk problem. They ARE removable:
+    # /library/api/remove stops the torrent before deleting anything, and an orphan has no torrent
+    # in the session at all, so there is nothing to corrupt.
+    for ih, size in part_bytes.items():
+        entries.append({
+            "name": f"incomplete download data ({ih[:8]})", "infoHash": ih, "size": size,
+            "mtime": 0, "pinned": False, "progress": 0.0, "state": "idle", "peers": 0,
+            "seeds": 0, "downloadSpeed": 0,
+            "uploaded": 0, "ratio": 0.0, "uploadSpeed": 0, "label": None, "removable": True,
+            # Not a title: there is no torrent and no file, only leftover piece data. The page
+            # still shows it (it is real disk), but anything that offers something to PLAY has to
+            # be able to skip it without matching on the display name.
+            "kind": "orphan",
+        })
+
+    # cache.usage already reports the budget as `cacheSize`; adding a second key for it would give
+    # one number two names, which is how the two spellings drift apart.
+    usage = cachemod.usage(cache_root, budget)
+    # What downloads in flight have already claimed but not yet written. Neither `df` nor the cache
+    # total can see it, so judging the next download on those alone approves things there will be
+    # no room for by the time everything already running has finished.
+    usage["committed"] = sum(int(p.get("remaining") or 0) for p in pins.values())
+    return {"entries": entries, "budget": usage}

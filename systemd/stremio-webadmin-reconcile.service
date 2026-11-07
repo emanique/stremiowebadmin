@@ -1,0 +1,14 @@
+[Unit]
+Description=Reconcile Stremio IPv4, DNS, GPU and authorised Gateway BT port
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/stremio-server-webadmin
+ExecStart=/usr/bin/python3 /opt/stremio-server-webadmin/scripts/reconcile-host.py
+TimeoutStartSec=270
+
+[Install]
+WantedBy=multi-user.target
