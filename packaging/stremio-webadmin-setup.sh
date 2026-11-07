@@ -3,7 +3,7 @@ set -eu
 export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 ROOT="${STREMIO_INSTALL_ROOT:-/opt/stremio-server-webadmin}"
 [ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }
-for executable in docker python3 nginx openssl ip resolvectl systemctl; do
+for executable in docker python3 nginx openssl ip systemctl; do
   command -v "$executable" >/dev/null 2>&1 || { echo "Missing prerequisite: $executable" >&2; exit 1; }
 done
 docker compose version >/dev/null
