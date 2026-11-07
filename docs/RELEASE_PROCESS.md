@@ -32,6 +32,16 @@ A public tag `v<RELEASE_VERSION>`, signed-off source revision, README, Debian pa
 8. Build or verify packages against the **public commit**, create public tag `v<RELEASE_VERSION>`, attach the Debian package, source archive, `SHA256SUMS`, release notes and precise source provenance. No release tag should be created before a successful public-clone installation.
 9. Keep a record of the private source SHA, public promotion SHA, test results, package hashes and exceptions in the public release notes.
 
+The private repository provides an Actions-free local promotion helper:
+
+```bash
+bash scripts/promote-public.sh --dry-run
+# Only after QA and review:
+bash scripts/promote-public.sh --publish
+```
+
+The script does not create a release tag. Release assets and tags remain gated by public-clone QA and explicit verification.
+
 ## Screenshot rules
 
 All screenshots are added first under `docs/screenshots/` in DEV. Keep the same filename and gallery ordering in both README files, matching the reference layout. Do not commit placeholder broken `<img>` references. Redact external IP addresses, internal hostnames when necessary, credentials, tokens, user media history and other sensitive identifiers.
