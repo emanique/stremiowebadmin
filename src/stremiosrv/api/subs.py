@@ -398,6 +398,43 @@ def _subtitle_stream_by_global_index(media_url: str, track: int) -> dict:
     raise HTTPException(status_code=404, detail="subtitle track not found")
 
 
+def _subtitle_ffmpeg_failure_reason(proc) -> str:
+    """Classify FFmpeg stderr without ever logging source URLs or media paths.
+
+    A temporary regular file is used instead of stderr=PIPE to avoid deadlocks
+    while a streaming FFmpeg process fills stdout before its error channel.
+    """
+    sink = getattr(proc, "_subtitle_diagnostic_file", None)
+    if sink is None:
+        return "unclassified"
+    try:
+        sink.seek(0)
+        details = sink.read(16384).decode("utf-8", errors="replace").lower()
+    except (OSError, ValueError):
+        return "unclassified"
+    categories = (
+        ("invalid data found when processing input", "incomplete_or_invalid_media"),
+        ("moov atom not found", "incomplete_or_invalid_media"),
+        ("end of file", "incomplete_or_invalid_media"),
+        ("error while decoding", "subtitle_decode_error"),
+        ("subtitle encoding", "subtitle_decode_error"),
+        ("stream map", "subtitle_stream_unavailable"),
+        ("does not contain any stream", "subtitle_stream_unavailable"),
+        ("connection timed out", "source_timeout"),
+        ("connection refused", "source_unavailable"),
+        ("http error", "source_http_error"),
+        ("invalid argument", "invalid_extraction_arguments"),
+        ("conversion failed", "ffmpeg_conversion_failed"),
+    )
+    return next((label for signature, label in categories if signature in details), "unclassified")
+
+
+def _close_subtitle_diagnostics(proc) -> None:
+    sink = getattr(proc, "_subtitle_diagnostic_file", None)
+    if sink is not None:
+        sink.close()
+
+
 def _webvtt_stream(proc: subprocess.Popen):
     """Yield FFmpeg WebVTT incrementally and always reap the child process.
 
@@ -414,7 +451,7 @@ def _webvtt_stream(proc: subprocess.Popen):
             yield chunk
         rc = proc.wait()
         if rc:
-            logger.warning("embedded subtitle ffmpeg exited with code %s", rc)
+            logger.warning("embedded subtitle ffmpeg exited with code %s reason=%s", rc, _subtitle_ffmpeg_failure_reason(proc))
     finally:
         if proc.poll() is None:
             proc.terminate()
@@ -423,6 +460,7 @@ def _webvtt_stream(proc: subprocess.Popen):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+        _close_subtitle_diagnostics(proc)
 
 
 _VTT_CUE_RE = re.compile(
@@ -486,7 +524,7 @@ def _read_webvtt_window(proc: subprocess.Popen, start: float | None, duration: f
         _trace_webvtt_timeline(payload, start, duration)
         payload = _add_webvtt_timestamp_map(payload, start, mpegts_start, timeline_offset)
         if rc:
-            logger.warning("embedded subtitle ffmpeg exited with code %s", rc)
+            logger.warning("embedded subtitle ffmpeg exited with code %s reason=%s", rc, _subtitle_ffmpeg_failure_reason(proc))
             return b""
         return payload
     finally:
@@ -497,6 +535,7 @@ def _read_webvtt_window(proc: subprocess.Popen, start: float | None, duration: f
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+        _close_subtitle_diagnostics(proc)
 
 
 def _cached_webvtt_window_stream(key: tuple, proc_factory, start: float | None, duration: float | None, mpegts_start: int = 0, timeline_offset: float = 0.0):
@@ -629,14 +668,18 @@ def subtitles_vtt(
     ]
 
     def _start_proc():
+        diagnostics = tempfile.TemporaryFile(mode="w+b")
         try:
-            return subprocess.Popen(
+            proc = subprocess.Popen(
                 argv,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=diagnostics,
                 bufsize=0,
             )
+            proc._subtitle_diagnostic_file = diagnostics
+            return proc
         except OSError as e:
+            diagnostics.close()
             raise HTTPException(
                 status_code=503,
                 detail="subtitle extractor unavailable",
