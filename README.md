@@ -8,7 +8,7 @@
 ![Docker](https://img.shields.io/badge/runtime-Docker%20Compose-2496ED?logo=docker&logoColor=white)
 ![GPU](https://img.shields.io/badge/transcoding-VAAPI%20%7C%20CPU-7C3AED)
 ![Core](https://img.shields.io/badge/Stremio_Core-1.6.34-5B21B6)
-![Status](https://img.shields.io/badge/status-first%20public%20release%20in%20preparation-F59E0B)
+![Status](https://img.shields.io/badge/status-public%20pre--release-F59E0B)
 
 **Run a Stremio/libtorrent streaming backend with a separate browser-based administration interface, WebPlayer, adaptive playback, and host-level network management.**
 
@@ -37,7 +37,7 @@
 
 ## 🖥️ WebAdmin gallery
 
-The initial screenshot set has been captured from the running standalone application. The files are being reviewed and prepared for publication. The gallery below identifies each capture; image elements will be activated only after the files are present in both repositories, to avoid broken README images.
+The initial screenshot set has been captured and locally sanitised. Files are pending binary promotion to both repositories; the gallery intentionally uses a descriptive table until the images exist in Git. The gallery below identifies each capture; image elements will be activated only after the files are present in both repositories, to avoid broken README images.
 
 | Screenshot | Functional evidence |
 |---|---|
@@ -120,7 +120,7 @@ sudo git clone https://github.com/emanique/stremiowebadmin.git /opt/stremio-serv
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
-**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The first setup prints a one-time WebAdmin administrator password; store it securely and rotate it using scripts/change-webadmin-password.py. A clean installation on an independent QA machine is still required before declaring the first tagged release production-ready.
+**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The first setup prints a one-time WebAdmin administrator password; store it securely and rotate it using scripts/change-webadmin-password.py. A separate Debian 13 KVM clean installation and reboot test passed. IPTV/device playback, external Gateway lease-change and security acceptance are still required before a stable release.
 
 ### Install from a release package
 
@@ -153,7 +153,7 @@ For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token,
 
 ## 🧪 Release readiness
 
-**Public source candidate:** standalone `0.1.3-rc.1` (WebAdmin `3.0.14`, Core `1.6.34`). **The full locked Python regression passed on Debian 13 QA: 1,583 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. The release is still conditional on a second-host clean-install and security acceptance; no production readiness is implied.
+**Public source candidate:** standalone `0.1.3-rc.2` (WebAdmin `3.0.14`, Core `1.6.34`). **The current frozen Python 3.12 regression passed on Debian 13 QA: 1,595 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. IPTV/device playback, authenticated Gateway port renewal and rollback, and external NAT reachability are not yet accepted; no production readiness is implied.
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 
