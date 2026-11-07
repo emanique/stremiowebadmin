@@ -3,10 +3,10 @@ set -eu
 export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 ROOT="${STREMIO_INSTALL_ROOT:-/opt/stremio-server-webadmin}"
 [ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }
-for executable in docker python3 nginx openssl ip systemctl; do
-  command -v "$executable" >/dev/null 2>&1 || { echo "Missing prerequisite: $executable" >&2; exit 1; }
-done
-docker compose version >/dev/null
+test -f "$ROOT/packaging/stremio-webadmin-prerequisites.sh" || {
+  echo "Missing bundled prerequisite installer" >&2; exit 1;
+}
+sh "$ROOT/packaging/stremio-webadmin-prerequisites.sh"
 test -f "$ROOT/start.sh"
 mkdir -p /var/lib/stremio-webadmin /etc/stremio-webadmin
 chmod 700 /etc/stremio-webadmin
