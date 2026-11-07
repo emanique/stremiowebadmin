@@ -18,7 +18,7 @@
 
 ---
 
-> **Publication status:** this repository is being prepared for its first standalone release. Until a source package, Debian package, SHA-256 manifest and release notes are attached to a verified GitHub Release, the commands below describe the intended distribution, not a published installer.
+> **Release status:** the public repository is the installable distribution of the private development project. The first standalone release is being prepared; the documented clone installation depends on Docker and host prerequisites. No GitHub Actions run in this public repository. Production-ready packages must only be attached after local validation, version parity and checksum verification.
 
 ## ✨ Features
 
@@ -106,7 +106,20 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 
 ## 📦 Installation
 
-The planned Debian/Ubuntu installation for the first verified public release is:
+### Install from the public Git repository
+
+Once a source snapshot has been promoted and validated, users can clone the public repository and run its standalone setup on a Debian/Ubuntu host with Docker Compose, nginx, Python 3, OpenSSL and network utilities installed:
+
+```bash
+sudo git clone https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
+sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
+```
+
+**Do not treat the current README-only public branch as installable until the full source promotion is complete.** The setup builds Docker images locally and configures the host services; it must be tested on a clean machine before a release is declared ready.
+
+### Install from a release package
+
+The Debian/Ubuntu installation command after the first verified release is:
 
 ```bash
 sudo apt install ./stremio-webadmin_<release>_all.deb
@@ -137,7 +150,13 @@ For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token,
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 
+The private development repository is [emanique/StremioServerWebAdmin](https://github.com/emanique/StremioServerWebAdmin) and is the sole source of truth. The public repository is a read-only distribution model for consumers (clone, setup and tagged packages), with **no GitHub Actions**. Development, tests, release candidates and quality gates run privately or locally. Promotion copies only approved source, documentation and install assets from an exact Git commit; the README and release version must match, and .env, credentials, keys, caches, test outputs and internal tooling must be excluded. See [Release and promotion process](docs/RELEASE_PROCESS.md).
+
 The initial source audit also identifies open acceptance items: extended IPTV playback in a real client, second-host clean installation, real authenticated Gateway port changes, and immutable GHCR image distribution. These are **not** claimed as completed.
+
+## 📸 Screenshot contribution
+
+The gallery filenames above are stable in **both** repositories. Add screenshots to `docs/screenshots/` in the private DEV repository first, with sensitive information removed; the approved set is promoted unchanged to the public repo together with the corresponding README. Do not use screenshot links before the image files exist.
 
 ## 📄 Provenance and licensing
 
