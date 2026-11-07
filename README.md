@@ -121,7 +121,7 @@ sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
 On a fresh Debian/Ubuntu host, the setup first installs missing Docker Engine,
-Docker Compose v2, Nginx, Python, OpenSSL and iproute2 packages via APT.
+Docker Compose v2, Docker Buildx, Nginx, Python, OpenSSL and iproute2 packages via APT.
 It checks for existing packages before installing anything and aborts on
 unsupported distributions. To require manual provisioning instead, set
 `STREMIO_SKIP_DEP_INSTALL=1` in the setup environment.
@@ -159,7 +159,7 @@ For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token,
 
 ## 🧪 Release readiness
 
-**Public source candidate:** standalone `0.1.3-rc.4` (WebAdmin `3.0.14`, Core `1.6.34`). **The current frozen Python 3.12 regression passed on Debian 13 QA: 1,627 passed, 3 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
+**Public source candidate:** standalone `0.1.3-rc.5` (WebAdmin `3.0.14`, Core `1.6.34`). **The current frozen Python 3.12 regression passed on Debian 13 QA: 1,627 passed, 3 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 

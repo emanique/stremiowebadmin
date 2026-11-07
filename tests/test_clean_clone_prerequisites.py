@@ -17,7 +17,7 @@ def test_setup_runs_prerequisites_before_creating_state():
 def test_bootstrap_covers_required_packages_and_distro():
     source=BOOTSTRAP.read_text()
     for package in ('docker.io','nginx','openssl','iproute2','python3',
-                    'docker-compose-v2','docker-compose-plugin','docker-compose'):
+                    'docker-compose-v2','docker-compose-plugin','docker-compose','docker-buildx','docker-buildx-plugin'):
         assert package in source
     assert 'apt-get update' in source
     assert 'apt-get install -y --no-install-recommends' in source
@@ -25,6 +25,7 @@ def test_bootstrap_covers_required_packages_and_distro():
     assert 'debian|ubuntu' in source
     assert 'systemctl enable --now docker' in source
     assert 'docker compose version' in source
+    assert 'docker buildx version' in source
 
 
 def test_setup_and_bootstrap_are_portable_sh():
