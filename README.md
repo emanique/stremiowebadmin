@@ -116,11 +116,11 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 Once a source snapshot has been promoted and validated, users can clone the public repository and run its standalone setup on a Debian/Ubuntu host with systemd. Missing Docker, Compose, Nginx, Python, OpenSSL and network utilities are installed by APT:
 
 ```bash
-sudo git clone https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
+sudo git clone --branch v0.1.3-rc.6 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
-On a fresh Debian/Ubuntu host, the setup first installs missing Docker Engine,
+For independent QA, the pinned pre-release tag above is intentional; cloning the mutable main branch would not reproduce the same release. The source install still builds the Core and WebAdmin images locally; no pre-existing images should be assumed.\n\nOn a fresh Debian/Ubuntu host, the setup first installs missing Docker Engine,
 Docker Compose v2, Docker Buildx, Nginx, Python, OpenSSL and iproute2 packages via APT.
 It checks for existing packages before installing anything and aborts on
 unsupported distributions. To require manual provisioning instead, set
