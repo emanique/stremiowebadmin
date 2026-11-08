@@ -2,7 +2,21 @@
 
 # Stremio WebAdmin — Standalone
 
-### Self-hosted Stremio Core, WebAdmin and WebPlayer with hardware-aware streaming
+#
+### Acesso WebAdmin sem password numa LAN de QA
+
+A instalação pública mantém **Basic Auth activada por defeito**, pois o WebAdmin tem controlo administrativo sobre o Docker. Para um servidor novo em laboratório, pode optar expressamente pelo acesso HTTPS sem password, restrito à sub-rede de confiança. Configure no host:
+
+```bash
+sudo sh -c 'printf "lan:192.168.1.0/24\\n" > /etc/stremio-webadmin/access-policy'
+sudo chmod 600 /etc/stremio-webadmin/access-policy
+sudo python3 /opt/stremio-server-webadmin/scripts/configure-host-https.py --apply
+```
+
+Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. A opção está disponível no código `main`; **não faz parte do pacote v0.1.3-rc.6 original**, que mantém autenticação obrigatória.
+
+
+## Self-hosted Stremio Core, WebAdmin and WebPlayer with hardware-aware streaming
 
 ![Linux](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-2563eb?logo=linux&logoColor=white)
 ![Docker](https://img.shields.io/badge/runtime-Docker%20Compose-2496ED?logo=docker&logoColor=white)
