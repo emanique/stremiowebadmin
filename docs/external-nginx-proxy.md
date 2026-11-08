@@ -1,6 +1,6 @@
 # Stremio behind an authenticated WAN Nginx reverse proxy
 
-Operational reference (validated 2026-11-08): [emmanique/stremioproxywan](https://github.com/emmanique/stremioproxywan). The WAN proxy is maintained independently of Stremio Core/WebAdmin. **Do not copy its authentication code or TLS secrets into this repository.**
+Operational reference (validated 2026-11-08): [emmanique/stremioproxywan](https://github.com/emanique/stremioproxywan). The WAN proxy is maintained independently of Stremio Core/WebAdmin. **Do not copy its authentication code or TLS secrets into this repository.**
 
 ## Client-specific endpoint selection
 
