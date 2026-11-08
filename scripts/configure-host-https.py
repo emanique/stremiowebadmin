@@ -49,14 +49,14 @@ def read_access_policy(base: Path) -> tuple[str, str | None]:
 def nginx_site(ip: str, auth_mode: str = "basic", trusted_cidr: str | None = None) -> str:
     address = ipaddress.IPv4Address(ip)
     if auth_mode == "basic":
-        auth_directives = '        auth_basic "Stremio WebAdmin";\\n        auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;'
+        auth_directives = '        auth_basic "Stremio WebAdmin";\n        auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;'
     elif auth_mode == "lan":
         if not trusted_cidr:
             raise ValueError("LAN mode needs explicit trusted_cidr")
         net = ipaddress.IPv4Network(trusted_cidr, strict=True)
         if not net.is_private or net.prefixlen < 24 or address not in net:
             raise ValueError("Trusted LAN network must include host IP and be private /24 or narrower")
-        auth_directives = f"        allow {net};\\n        deny all;"
+        auth_directives = f"        allow {net};\n        deny all;"
     else:
         raise ValueError("Invalid authentication mode")
     return f"""# Generated for current host IPv4 by StremioServerWebAdmin.
