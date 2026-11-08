@@ -58,3 +58,23 @@ def test_gateway_status_not_hardcoded():
     assert _valid_gateway_address("10.3.10.1")=="10.3.10.1"
     assert _valid_gateway_address("8.8.8.8") is None
     assert _valid_gateway_address("not-ip") is None
+
+
+def test_explicit_lan_mode_disables_password_only_in_trusted_network(tmp_path):
+    import pytest
+    mod=load("https_host_lan","scripts/configure-host-https.py")
+    policy=tmp_path/"access-policy"
+    assert mod.read_access_policy(tmp_path)==("basic",None)
+    policy.write_text("lan:192.168.1.0/24\\n".replace("\\n","\n"))
+    mode,subnet=mod.read_access_policy(tmp_path)
+    assert (mode,subnet)==("lan","192.168.1.0/24")
+    site=mod.nginx_site("192.168.1.234", mode, subnet)
+    assert "allow 192.168.1.0/24;" in site
+    assert "deny all;" in site
+    assert "auth_basic_user_file" not in site
+    assert "proxy_pass http://127.0.0.1:8090;" in site
+    with pytest.raises(ValueError):
+        mod.nginx_site("10.10.10.10","lan","192.168.1.0/24")
+    policy.write_text("lan:0.0.0.0/0")
+    with pytest.raises(ValueError):
+        mod.read_access_policy(tmp_path)
