@@ -28,8 +28,37 @@ def detect_ip() -> str:
     return str(value)
 
 
-def nginx_site(ip: str) -> str:
-    ipaddress.IPv4Address(ip)
+def read_access_policy(base: Path) -> tuple[str, str | None]:
+    """Explicit local opt-in; secure Basic auth remains the default."""
+    policy = base / "access-policy"
+    if not policy.exists():
+        return "basic", None
+    if policy.is_symlink() or not policy.is_file():
+        raise ValueError("access-policy must be a regular file")
+    value = policy.read_text(encoding="ascii").strip()
+    if value == "basic":
+        return "basic", None
+    if not value.startswith("lan:"):
+        raise ValueError("access-policy must be basic or lan:IPV4_CIDR")
+    network = ipaddress.ip_network(value[4:], strict=True)
+    if network.version != 4 or not network.is_private or network.prefixlen < 24:
+        raise ValueError("LAN mode requires a private IPv4 CIDR with /24 or narrower")
+    return "lan", str(network)
+
+
+def nginx_site(ip: str, auth_mode: str = "basic", trusted_cidr: str | None = None) -> str:
+    address = ipaddress.IPv4Address(ip)
+    if auth_mode == "basic":
+        auth_directives = '        auth_basic "Stremio WebAdmin";\\n        auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;'
+    elif auth_mode == "lan":
+        if not trusted_cidr:
+            raise ValueError("LAN mode needs explicit trusted_cidr")
+        net = ipaddress.IPv4Network(trusted_cidr, strict=True)
+        if not net.is_private or net.prefixlen < 24 or address not in net:
+            raise ValueError("Trusted LAN network must include host IP and be private /24 or narrower")
+        auth_directives = f"        allow {net};\\n        deny all;"
+    else:
+        raise ValueError("Invalid authentication mode")
     return f"""# Generated for current host IPv4 by StremioServerWebAdmin.
 # WebPlayer streaming endpoints are independent (8080, 11470, 12470).
 server {{
@@ -46,8 +75,7 @@ server {{
     add_header Cache-Control "no-store" always;
     client_max_body_size 2m;
     location / {{
-        auth_basic "Stremio WebAdmin";
-        auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;
+{auth_directives}
         proxy_pass http://127.0.0.1:8090;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -119,7 +147,9 @@ def provision(ip: str) -> None:
         raise PermissionError("run the HTTPS host installer as root")
     base = Path("/etc/stremio-webadmin")
     base.mkdir(mode=0o700, exist_ok=True)
-    ensure_admin_auth(base)
+    mode, subnet = read_access_policy(base)
+    if mode == "basic":
+        ensure_admin_auth(base)
     cert, key = base / "webadmin.crt", base / "webadmin.key"
     if not certificate_matches(cert, ip) or not key.is_file():
         with tempfile.TemporaryDirectory(dir=base) as temp:
@@ -139,7 +169,7 @@ def provision(ip: str) -> None:
     site = Path("/etc/nginx/sites-available/stremio-webadmin")
     site.parent.mkdir(parents=True, exist_ok=True)
     previous = site.read_text() if site.is_file() else None
-    site.write_text(nginx_site(ip))
+    site.write_text(nginx_site(ip, mode, subnet))
     enabled = Path("/etc/nginx/sites-enabled/stremio-webadmin")
     enabled.parent.mkdir(parents=True, exist_ok=True)
     if enabled.is_symlink() or enabled.is_file():
