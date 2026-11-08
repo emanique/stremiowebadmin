@@ -83,3 +83,20 @@ Pode usar wan_tls_mode=trusted com wan_cert/wan_key adequados. Autoassinado na W
 | Recuperação | backup, restore e rollback sem perda de configuração |
 
 **NO-GO para GA** até executar estas provas nas novas máquinas. O código e as suites unitárias não substituem o teste físico de rede, VPN e playback.
+
+## Recolha automática de evidências (leitura apenas)
+
+Depois da instalação de cada VM, utilizar o script público scripts/qa-three-server-evidence.sh. Este script **não** altera serviços nem recolhe .env, certificados privados, tokens, passwords, perfis VPN ou logs. Gera um arquivo local com estado de rede, Docker, systemd e sondas HTTP/TLS, em /var/tmp/fresh-install-qa, com permissões restritas. Rever os IP/hostnames antes de partilhar.
+
+~~~bash
+# Executar na nova máquina Gateway:
+bash scripts/qa-three-server-evidence.sh --role gateway --gateway-ip IP_NOVO_GATEWAY
+
+# Executar na nova máquina Stremio:
+bash scripts/qa-three-server-evidence.sh --role stremio --stremio-ip IP_NOVO_STREMIO
+
+# Executar na nova máquina ProxyWAN:
+bash scripts/qa-three-server-evidence.sh --role proxy --wan-host DOMINIO_WAN
+~~~
+
+O script está no repositório público Stremio. Pode ser obtido num clone independente, mesmo quando executado no Gateway ou Proxy. Se for executado sem privilégios Docker, o resultado será registado como não verificado. Certificados autoassinados podem falhar correctamente as sondas TLS; não desligar a validação por conveniência. O estado de reprodução de filmes, NAT e rollback exige testes funcionais adicionais, não está incluído neste script.
