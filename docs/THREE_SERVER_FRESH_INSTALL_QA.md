@@ -19,12 +19,13 @@ Substituir os valores de exemplo antes de executar. O IPv4 LAN Stremio é fixo a
 
 Fonte: https://github.com/emmanique/vpngateway-webadmin
 
-A versão de QA 1.0.6-rc.1 está na main com correcções posteriores à tag pública v1.0.5. Registar o commit exacto e **não** instalar os pacotes antigos v1.0.5 para validar a integração recente.
+A versão de QA 1.0.6-rc.1 está na main com correcções posteriores à tag pública v1.0.5. Usar a revisão de código 1178cbb31c1d9ecd7d362f178f87f81ed53b7806, validada com 360 testes Python 3.12. Registar o commit exacto e **não** instalar os pacotes antigos v1.0.5 para validar a integração recente.
 
 ~~~bash
 sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/emmanique/vpngateway-webadmin.git
 cd vpngateway-webadmin
+git checkout 1178cbb31c1d9ecd7d362f178f87f81ed53b7806
 git rev-parse HEAD
 sudo ./start.sh --lan-interface INTERFACE_LAN --lan-ip IP_GATEWAY
 ~~~
