@@ -51,7 +51,13 @@ def reconcile() -> int:
         print("host networking reconciled",flush=True)
     # Boot GPU and port bindings may change without DNS/IP changes.
     command(sys.executable,str(ROOT/"scripts/boot-gpu-reconcile.py"),timeout=170)
-    # Gateway port state is read only; a missing host token remains unconfigured.
+    # Independent authenticated observer takes precedence. Otherwise, on a
+    # trusted management LAN the authorised host can observe its own mapping.
+    # This probe is read-only; only the consumer changes .env and Docker.
+    probe=subprocess.run([sys.executable,str(ROOT/"scripts/auto-gateway-observer.py")],
+                         cwd=ROOT,timeout=18,text=True,capture_output=True)
+    if probe.returncode:
+        print("Gateway auto-observer status:",probe.stderr.strip(),file=sys.stderr)
     result=subprocess.run([sys.executable,str(ROOT/"scripts/gateway-port-sync.py")],
                           cwd=ROOT,timeout=170,text=True,capture_output=True)
     if result.returncode:

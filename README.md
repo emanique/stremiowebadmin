@@ -13,7 +13,7 @@ sudo chmod 600 /etc/stremio-webadmin/access-policy
 sudo python3 /opt/stremio-server-webadmin/scripts/configure-host-https.py --apply
 ```
 
-Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. O comportamento automático sem autenticação só se aplica ao código corrigido posteriormente à tag RC8. A RC8 originalmente publicada ainda gera credenciais; uma nova release será necessária para novos utilizadores obterem este comportamento por tag.
+Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. O comportamento automático sem autenticação só se aplica ao código corrigido posteriormente à tag RC8. A RC8 anteriormente publicada ainda gera credenciais; a RC9 já aplica automaticamente esta política.
 
 
 ## Self-hosted Stremio Core, WebAdmin and WebPlayer with hardware-aware streaming
@@ -33,6 +33,10 @@ Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O 
 ---
 
 > **Release status:** the public repository is the installable distribution of the private development project. The current standalone RC8 candidate is available; the documented clone installation depends on Docker and host prerequisites. Release automation verifies and publishes packages using GitHub Actions. Production-ready packages must only be attached after local validation, version parity and checksum verification.
+
+**Release RC9:** [v0.1.3-rc.9](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3-rc.9). A instalação nova não exige login no WebAdmin quando a interface de gestão está numa LAN privada /24 ou mais restrita. A sincronização do BitTorrent consulta automaticamente a autorização do host no VPN Gateway `v1.0.8` quando este é o gateway predefinido: se IP/MAC, política, TCP/UDP e atribuição NAT-PMP estiverem válidos, actualiza `.env` e recria apenas o Core, verificando health e dispositivo VAAPI. Sem autorização válida, regressa à porta `6881` após uma tolerância de até 120 segundos para renovações de lease. O Gateway gere exclusivamente a política e o lease; o host Stremio é o único a escrever a porta.
+
+**Confiança e limites:** a descoberta automática de primeiro contacto usa a identidade do próximo salto predefinido e *TOFU* (certificado TLS fixado localmente após verificar o IP no SAN); requer uma LAN privada fiável com protecção contra spoofing L2. Em redes não confiáveis, use a integração anterior com certificado de CA aprovado e token dedicado, não este modo automático. O Stremio não encaminha por VPN se o Gateway deixar de ter uma política que o autorize; a porta 6881 local não é prova de disponibilidade pública.
 
 **Release RC8:** [v0.1.3-rc.8 e packages](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3-rc.8). Contém registo HLS para entradas IPTV/HTTP sem infohash, associação dos processos FFmpeg às sessões e limpeza do registo após GC. Mantém a correcção do monitor de processos não registados da RC7. A promoção é candidata e não certificação de produção; testes prolongados de dispositivos IPTV, renovações de porta e avaliação completa de instalação limpa continuam distintos dos testes dirigidos executados.
 
@@ -132,7 +136,7 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 Once a source snapshot has been promoted and validated, users can clone the public repository and run its standalone setup on a Debian/Ubuntu host with systemd. Missing Docker, Compose, Nginx, Python, OpenSSL and network utilities are installed by APT:
 
 ```bash
-sudo git clone --branch v0.1.3-rc.8 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
+sudo git clone --branch v0.1.3-rc.9 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
@@ -144,12 +148,27 @@ unsupported distributions. To require manual provisioning instead, set
 
 **The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The corrected installer defaults to passwordless HTTPS restricted to the detected trusted private LAN; explicit `basic` access-policy remains supported if authentication is required. A separate Debian 13 KVM clean installation and reboot test passed. IPTV/device playback, external Gateway lease-change and security acceptance are still required before a stable release.
 
+### Update an existing tag-based source installation
+
+A source clone using `--branch v0.1.3-rc.8` is in detached-HEAD state. Do not use `git pull` directly. Preserve your existing `.env`, persistent volumes and any local changes before switching to the new public tag:
+
+```bash
+cd /opt/stremio-server-webadmin
+sudo git fetch origin --tags
+sudo git checkout v0.1.3-rc.9
+sudo sh packaging/stremio-webadmin-setup.sh
+```
+
+If the checkout reports modified files, **back them up first** (for example `git stash push -u`), then change tag; do not discard local settings or run `docker compose down -v`. The installer does not replace an existing `.env`. For a fresh clone, use the RC9 clone command above.
+
+The automatic trusted-LAN Gateway observer uses the active IPv4 default next hop. A matching, authorised policy is required in VPN Gateway Multi v1.0.8; if missing or revoked the Stremio BT listen port safely converges to 6881 after a 120-second lease-renewal grace, without changing Gateway routing policies. The first TLS certificate is pinned (TOFU); if the Gateway certificate later changes, the host refuses new observations until trust is explicitly re-established.
+
 ### Install from a release package
 
 The Debian/Ubuntu installation command after the first verified release is:
 
 ```bash
-sudo apt install ./stremio-webadmin_0.1.3~rc8_all.deb
+sudo apt install ./stremio-webadmin_0.1.3.rc9_all.deb
 sudo stremio-webadmin-setup
 ```
 
@@ -175,7 +194,7 @@ For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token,
 
 ## 🧪 Release readiness
 
-**Public pre-release candidate (RC8):** standalone `0.1.3-rc.8` (WebAdmin `3.0.14`, Core `1.6.34`). **Historical RC6 QA evidence (not a new RC8 full-suite claim):** The frozen Python 3.12 regression passed on Debian 13 QA: 1,629 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
+**Historical pre-release candidate (RC8):** standalone `0.1.3-rc.8` (WebAdmin `3.0.14`, Core `1.6.34`). **Historical RC6 QA evidence (not a new RC8 full-suite claim):** The frozen Python 3.12 regression passed on Debian 13 QA: 1,629 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 

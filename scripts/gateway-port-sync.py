@@ -23,6 +23,10 @@ STATUS = Path("/var/lib/stremio-webadmin/port-status.json")
 OBSERVATION = Path("/var/lib/stremio-webadmin/gateway-port-observation.json")
 LOCK = Path("/run/lock/stremio-webadmin-port-sync.lock")
 CONF = Path("/etc/stremio-webadmin/port-sync.conf")
+LAST_VERIFIED = Path("/var/lib/stremio-webadmin/last-verified-gateway-port.json")
+DEFAULT_BT_PORT = 6881
+# Allow brief NAT-PMP renewal gaps without repeatedly recreating the container.
+LEASE_GRACE_SECONDS = 120
 KEY = "STREMIOSRV_BT_LISTEN_PORT"
 
 
@@ -128,6 +132,45 @@ def load_verified_observation(path: Path, *, policy: str, mac: str,
         or not issued <= now <= issued + 75 or expiry - now < 12):
         return None
     return port, route
+
+
+def last_verified_seconds(path: Path, policy: str, mac: str, host: str,
+                          gateway: str, now: float) -> float | None:
+    """Only a recent root-owned record of the exact host may delay fallback."""
+    if path.is_symlink() or not path.is_file():
+        return None
+    info=path.stat()
+    if info.st_uid != 0 or info.st_mode & 0o077 or info.st_size > 2048:
+        return None
+    try:
+        saved=json.loads(path.read_text())
+        if (saved.get("policy_id") != policy or saved.get("mac") != mac
+            or saved.get("host_ip") != host or saved.get("gateway") != gateway):
+            return None
+        when=saved.get("verified_at")
+        if type(when) not in (int,float) or not 0 <= now-when:
+            return None
+        return now-when
+    except (ValueError,TypeError,KeyError,OSError):
+        return None
+
+
+def mark_verified(path: Path, policy: str, mac: str, host: str, gateway: str,
+                  now: float) -> None:
+    path.parent.mkdir(parents=True,exist_ok=True)
+    atomic_write(path, json.dumps({"policy_id":policy,"mac":mac,
+                     "host_ip":host,"gateway":gateway,"verified_at":now})+"\n")
+
+
+def fallback_port(policy: str, mac: str, host: str, gateway: str, now: float) -> str:
+    """Never use an unverified VPN port indefinitely; keep network fail-closed."""
+    age=last_verified_seconds(LAST_VERIFIED,policy,mac,host,gateway,now)
+    if age is not None and age < LEASE_GRACE_SECONDS:
+        return "awaiting_verified_lease"
+    # Changing the listen port does not alter the Gateway VPN/blocked routing.
+    outcome=reconcile(DEFAULT_BT_PORT)
+    LAST_VERIFIED.unlink(missing_ok=True)
+    return "default_port_restored" if outcome=="recreated" else "default_port_verified"
 
 
 def effective_port():
@@ -262,7 +305,12 @@ def main():
                 k,v=line.split("=",1)
                 values[k.strip()]=v.strip()
     if values.get("ENABLED")!="1":
-        status("unconfigured",detail="Gateway host policy and dedicated token not provisioned")
+        # No active authorisation means the service must not retain a former
+        # VPN-assigned listen port across reinstalls or policy revocations.
+        result=reconcile(DEFAULT_BT_PORT)
+        LAST_VERIFIED.unlink(missing_ok=True)
+        status("unconfigured_default_port",port=DEFAULT_BT_PORT,
+               detail="Gateway authorisation not enabled; default TCP/UDP port restored")
         return 0
     policy=values["POLICY_ID"]
     mac=values["HOST_MAC"].lower()
@@ -281,16 +329,23 @@ def main():
         gw=str(vpn_gateway)
         if values.get("SOURCE") != "observation":
             raise PortSyncError("SOURCE=observation is required; direct Gateway API access is disabled")
-        choice=load_verified_observation(OBSERVATION,policy=policy,mac=mac,
-                                         host_ip=host,gateway=gw,now=time.time())
-        if choice is None:
-            status("no_verified_port_change",gateway=gw,
-                   detail="no fresh authenticated port assignment for this host")
-            return 0
-        port,route=choice
+        try:
+            choice=load_verified_observation(OBSERVATION,policy=policy,mac=mac,
+                                             host_ip=host,gateway=gw,now=time.time())
+        except (PortSyncError,OSError,ValueError):
+            # An absent or untrusted observer must never indefinitely retain a
+            # stale provider lease. Fall back after the short renewal grace.
+            choice=None
         if route_identity(mac)!=(router,nic,host):
             raise PortSyncError("host egress route changed after observation")
+        if choice is None:
+            outcome=fallback_port(policy,mac,host,gw,time.time())
+            status(outcome,port=DEFAULT_BT_PORT if outcome!="awaiting_verified_lease" else None,
+                   gateway=gw,detail="Gateway authorisation/valid lease unavailable")
+            return 0
+        port,route=choice
         outcome=reconcile(port)
+        mark_verified(LAST_VERIFIED,policy,mac,host,gw,time.time())
         status(outcome,port=port,gateway=gw,route=route)
     return 0
 
