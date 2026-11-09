@@ -115,9 +115,13 @@
     const registryAvailable = !!(playback && Array.isArray(playback.active));
     const playbackRows = registryAvailable ? playback.active : [];
     const activeWorkloads = new Set(playbackRows.map(p => p.workloadId || p.jobId).filter(Boolean));
-    const liveSessions = registryAvailable
-      ? sessions.filter(session => activeWorkloads.has(session.jobId))
-      : sessions;
+    // The registry tracks recent playback requests, not the FFmpeg process lifecycle.
+    // Report live FFmpeg processes even if an HLS job has lost registry correlation.
+    // Do not mislabel unregistered processes as confirmed active playback.
+    const liveSessions = sessions;
+    const unmatchedSessions = registryAvailable
+      ? sessions.filter(session => !session.jobId || !activeWorkloads.has(session.jobId))
+      : [];
     const waitingForGc = registryAvailable && playbackRows.length === 0 && sessions.length > 0;
     const liveEngines = [...new Set(liveSessions.map(session => session.engine).filter(Boolean))];
     const liveTranscoding = liveSessions.filter(session => session.action === 'transcoding').length;
@@ -147,11 +151,10 @@
     const actualRuntime = document.getElementById('tdActualRuntime');
     if (requestedEffective) requestedEffective.textContent =
       `${String(requested.mode || 'auto').toUpperCase()} / ${String(requested.hwaccel || 'auto').toUpperCase()} / ${requested.videoCodec || '—'} → ${effective.runtimeReady ? 'READY' : 'NOT READY'}`;
-    if (actualRuntime) actualRuntime.textContent = waitingForGc
-      ? `WAITING FOR GC · ${sessions.length} FFmpeg process(es)`
-      : liveSessions.length
-        ? `${liveEngines.map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${liveSessions.length} active session(s)`
-        : 'IDLE · no active playback';
+    if (actualRuntime) actualRuntime.textContent = liveSessions.length
+      ? `${liveEngines.map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${liveSessions.length} FFmpeg process(es)${unmatchedSessions.length ? ' · ' + unmatchedSessions.length + ' unregistered playback job(s)' : ''}${waitingForGc ? ' · playback registry empty; verify HLS GC' : ''}`
+      : 'IDLE · no active FFmpeg';
+
     document.getElementById('tdHardware').innerHTML = [
       chip(`VAAPI ${hw.vaapiDevice || ''}`, Boolean(hw.vaapiDevicePresent && (hw.h264Vaapi || hw.hevcVaapi)), !hw.vaapiDevicePresent),
       chip('H.264 VAAPI', Boolean(hw.h264Vaapi)),
@@ -160,7 +163,13 @@
       chip('HEVC NVENC', Boolean(hw.hevcNvenc)),
       chip('libx264 fallback', Boolean(hw.libx264))
     ].join('');
-    document.getElementById('tdSessions').innerHTML = liveSessions.length ? liveSessions.map(sessionHtml).join('') : '<div class="empty">No active playback transcoding sessions</div>';
+    document.getElementById('tdSessions').innerHTML = liveSessions.length
+      ? liveSessions.map((session, index) => {
+          const html = sessionHtml(session, index);
+          const unregistered = registryAvailable && (!session.jobId || !activeWorkloads.has(session.jobId));
+          return unregistered ? html.replace('<span class="badge">', '<span class="badge" title="FFmpeg detected; playback registry does not contain this job">UNREGISTERED · ') : html;
+        }).join('')
+      : '<div class="empty">No active FFmpeg processes</div>';
     document.getElementById('tdDecision').textContent = data.latestDecision?.decision || 'No policy decision recorded yet';
     const progress = data.latestProgress;
     document.getElementById('tdProgress').textContent = progress
