@@ -5,7 +5,7 @@
 #
 ### Acesso WebAdmin sem password numa LAN de QA
 
-A instalação pública mantém **Basic Auth activada por defeito**, pois o WebAdmin tem controlo administrativo sobre o Docker. Para um servidor novo em laboratório, pode optar expressamente pelo acesso HTTPS sem password, restrito à sub-rede de confiança. Configure no host:
+A instalação pública configura **acesso HTTPS sem password por defeito**, limitado automaticamente à sub-rede IPv4 privada efectivamente configurada na interface de gestão (prefixo /24 ou mais restrito). O WebAdmin possui privilégios de gestão do Docker: não exponha a porta TCP/443 a redes não confiáveis. Para uma instalação anterior, pode optar explicitamente por uma política LAN através de:
 
 ```bash
 sudo sh -c 'printf "lan:192.168.1.0/24\\n" > /etc/stremio-webadmin/access-policy'
@@ -13,7 +13,7 @@ sudo chmod 600 /etc/stremio-webadmin/access-policy
 sudo python3 /opt/stremio-server-webadmin/scripts/configure-host-https.py --apply
 ```
 
-Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. A opção está disponível no código `main`; **não fazia parte da RC6 original**; confirme a política de acesso efectiva na RC8 antes de disponibilizar a gestão.
+Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. O comportamento automático sem autenticação só se aplica ao código corrigido posteriormente à tag RC8. A RC8 originalmente publicada ainda gera credenciais; uma nova release será necessária para novos utilizadores obterem este comportamento por tag.
 
 
 ## Self-hosted Stremio Core, WebAdmin and WebPlayer with hardware-aware streaming
@@ -142,14 +142,14 @@ It checks for existing packages before installing anything and aborts on
 unsupported distributions. To require manual provisioning instead, set
 `STREMIO_SKIP_DEP_INSTALL=1` in the setup environment.
 
-**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The first setup prints a one-time WebAdmin administrator password; store it securely and rotate it using scripts/change-webadmin-password.py. A separate Debian 13 KVM clean installation and reboot test passed. IPTV/device playback, external Gateway lease-change and security acceptance are still required before a stable release.
+**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The corrected installer defaults to passwordless HTTPS restricted to the detected trusted private LAN; explicit `basic` access-policy remains supported if authentication is required. A separate Debian 13 KVM clean installation and reboot test passed. IPTV/device playback, external Gateway lease-change and security acceptance are still required before a stable release.
 
 ### Install from a release package
 
 The Debian/Ubuntu installation command after the first verified release is:
 
 ```bash
-sudo apt install ./stremio-webadmin_0.1.3.rc8_all.deb
+sudo apt install ./stremio-webadmin_0.1.3~rc8_all.deb
 sudo stremio-webadmin-setup
 ```
 
@@ -169,7 +169,7 @@ These are defaults, not a guarantee that a firewall or reverse proxy permits ext
 
 ## 🔒 Security
 
-**The standalone WebAdmin has privileged Docker management capabilities. New installs require HTTP Basic authentication via Nginx HTTPS, while the direct WebAdmin remains on loopback.** Restrict TCP 443 to a trusted administrator LAN and apply host firewall rules. Treat the Docker socket, environment files, provider credentials and API tokens as privileged secrets.
+**The standalone WebAdmin has privileged Docker management capabilities. Corrected new installs use HTTPS without a login only for the detected trusted LAN, enforced by Nginx `allow`/`deny`; the direct WebAdmin remains on loopback.** Restrict TCP 443 to a trusted administrator LAN and apply host firewall rules. Treat the Docker socket, environment files, provider credentials and API tokens as privileged secrets.
 
 For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token, the expected host MAC/IP and policy identity, a current lease, and verified matching TCP/UDP port values. Never embed private keys or tokens in examples, screenshots or release packages.
 

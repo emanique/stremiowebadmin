@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import grp
 import ipaddress
 import os
@@ -28,11 +29,29 @@ def detect_ip() -> str:
     return str(value)
 
 
-def read_access_policy(base: Path) -> tuple[str, str | None]:
-    """Explicit local opt-in; secure Basic auth remains the default."""
+def trusted_local_subnet(ip: str) -> str:
+    """Only the actual host's private LAN subnet can be passwordless."""
+    addr = ipaddress.IPv4Address(ip)
+    if not addr.is_private or addr.is_loopback:
+        raise ValueError("Passwordless WebAdmin requires private LAN IPv4")
+    addresses = json.loads(execute("ip", "-4", "-j", "address", "show").stdout)
+    networks = [
+        ipaddress.IPv4Network(f"{ip}/{info['prefixlen']}", strict=False)
+        for iface in addresses for info in iface.get("addr_info", [])
+        if info.get("family") == "inet" and info.get("local") == ip
+    ]
+    if len(networks) != 1 or networks[0].prefixlen < 24 or not networks[0].is_private:
+        raise ValueError("Trusted LAN must have one matching private /24-or-narrower IPv4 network")
+    return str(networks[0])
+
+
+def read_access_policy(base: Path, host_ip: str | None = None) -> tuple[str, str | None]:
+    """Default to no login on the detected trusted LAN; preserve explicit basic opt-in."""
     policy = base / "access-policy"
     if not policy.exists():
-        return "basic", None
+        if not host_ip:
+            raise ValueError("Host IPv4 required for default LAN access")
+        return "lan", trusted_local_subnet(host_ip)
     if policy.is_symlink() or not policy.is_file():
         raise ValueError("access-policy must be a regular file")
     value = policy.read_text(encoding="ascii").strip()
@@ -147,7 +166,7 @@ def provision(ip: str) -> None:
         raise PermissionError("run the HTTPS host installer as root")
     base = Path("/etc/stremio-webadmin")
     base.mkdir(mode=0o700, exist_ok=True)
-    mode, subnet = read_access_policy(base)
+    mode, subnet = read_access_policy(base, ip)
     if mode == "basic":
         ensure_admin_auth(base)
     cert, key = base / "webadmin.crt", base / "webadmin.key"

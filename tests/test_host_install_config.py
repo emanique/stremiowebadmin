@@ -64,7 +64,16 @@ def test_explicit_lan_mode_disables_password_only_in_trusted_network(tmp_path):
     import pytest
     mod=load("https_host_lan","scripts/configure-host-https.py")
     policy=tmp_path/"access-policy"
-    assert mod.read_access_policy(tmp_path)==("basic",None)
+    from types import SimpleNamespace
+    monkey_ip="192.168.1.234"
+    original=mod.execute
+    def fake_execute(*args, **kwargs):
+        if args[:4] == ("ip", "-4", "-j", "address"):
+            return SimpleNamespace(stdout='[{"addr_info":[{"family":"inet","local":"192.168.1.234","prefixlen":24}]}]')
+        return original(*args, **kwargs)
+    mod.execute=fake_execute
+    assert mod.read_access_policy(tmp_path, monkey_ip)==("lan","192.168.1.0/24")
+    mod.execute=original
     policy.write_text("lan:192.168.1.0/24\\n".replace("\\n","\n"))
     mode,subnet=mod.read_access_policy(tmp_path)
     assert (mode,subnet)==("lan","192.168.1.0/24")
