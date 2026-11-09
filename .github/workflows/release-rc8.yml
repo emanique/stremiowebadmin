@@ -1,0 +1,50 @@
+name: Publish Stremio Standalone RC8
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release-rc8.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publish-stremio-rc8
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify version and test selected HLS regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat RELEASE_VERSION)" = "0.1.3-rc.8"
+          python -m pip install --disable-pip-version-check -q . pytest pytest-asyncio
+          python -m pytest -q tests/test_hls_external_registry_stable.py tests/test_playback_sessions.py tests/test_transcode_gc.py tests/test_hls_routes.py
+      - name: Build source archive and Debian source-build package
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-qa-release.sh "$PWD/release-assets"
+          (cd release-assets && sha256sum -c SHA256SUMS)
+          dpkg-deb --field release-assets/stremio-webadmin_0.1.3~rc8_all.deb Version | grep -Fx '0.1.3~rc8'
+      - name: Publish verified pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          if gh release view v0.1.3-rc.8 >/dev/null 2>&1; then
+            gh release upload v0.1.3-rc.8 stremio-webadmin-0.1.3-rc.8-source.tar.gz 'stremio-webadmin_0.1.3~rc8_all.deb' SHA256SUMS --clobber
+          else
+            gh release create v0.1.3-rc.8 stremio-webadmin-0.1.3-rc.8-source.tar.gz 'stremio-webadmin_0.1.3~rc8_all.deb' SHA256SUMS --target "$GITHUB_SHA" --title 'Stremio Standalone v0.1.3-rc.8' --prerelease --notes-file ../docs/releases/v0.1.3-rc.8.md
+          fi
+          gh release view v0.1.3-rc.8 --json tagName,isPrerelease,assets,url
