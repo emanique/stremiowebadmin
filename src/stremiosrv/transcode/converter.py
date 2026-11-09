@@ -878,7 +878,7 @@ class Converter:
         return len(removed)
 
 def run_transcode_gc(converter: Converter, interval: int = 60, max_age: int = 600,
-                     idle_after: int = 300) -> None:
+                     idle_after: int = 300, on_reaped=None) -> None:
     """Background loop reclaiming abandoned transcodes and their output. Runs forever.
 
     Two reclaims, in order. `reap_idle` ends encoders nothing is reading -- a crashed player holds
@@ -894,7 +894,13 @@ def run_transcode_gc(converter: Converter, interval: int = 60, max_age: int = 60
     while True:
         time.sleep(interval)
         try:
-            converter.reap_idle(idle_after)
+            reaped = converter.reap_idle(idle_after)
+            if on_reaped is not None:
+                for job_id in reaped:
+                    try:
+                        on_reaped(job_id)
+                    except Exception:
+                        logger.exception("transcode playback registry cleanup failed for %s", job_id)
         except Exception:
             logger.exception("transcode reap failed")
         try:

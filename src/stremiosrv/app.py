@@ -276,6 +276,8 @@ def build_app() -> FastAPI:
         daemon=True,
     ).start()
     # ...and the same for transcode output, which the evictor is forbidden to reclaim.
+    # Share the same playback registry used by the HLS routes with the GC loop.
+    application = create_app(settings=settings, engine=engine, converter=converter)
     threading.Thread(
         target=run_transcode_gc,
         args=(converter,),
@@ -283,11 +285,10 @@ def build_app() -> FastAPI:
             "interval": settings.transcode_gc_interval,
             "max_age": settings.transcode_gc_max_age,
             "idle_after": settings.transcode_idle_timeout,
+            "on_reaped": application.state.playback_registry.end_hls,
         },
         daemon=True,
     ).start()
     # Wrap outermost so a mid-stream client disconnect doesn't spam the ASGI error log (see
     # SuppressClientDisconnect). create_app stays a plain FastAPI app for tests.
-    return SuppressClientDisconnect(
-        create_app(settings=settings, engine=engine, converter=converter)
-    )
+    return SuppressClientDisconnect(application)

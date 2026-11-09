@@ -358,11 +358,13 @@ def master(
         raise HTTPException(status_code=400, detail="invalid job id") from e
     registry = _playback_registry(request)
     parsed_source = parse_stream_url(mediaURL)
-    if registry is not None and parsed_source is not None:
+    if registry is not None:
+        # HTTP/IPTV mediaURL has no torrent infohash, but it is still a real HLS
+        # playback. The previous guard silently omitted those sessions.
         registry.register_hls_job(
             job_id,
-            parsed_source[0],
-            parsed_source[1],
+            parsed_source[0] if parsed_source is not None else "",
+            parsed_source[1] if parsed_source is not None else -1,
             request.headers.get("User-Agent"),
             conv.workload_for_job(job_id),
         )
