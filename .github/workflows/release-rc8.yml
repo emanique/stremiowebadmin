@@ -1,3 +1,4 @@
+# Release retry after enabling repository Actions
 name: Publish Stremio Standalone RC8
 on:
   push:
