@@ -2,6 +2,13 @@
 
 # Stremio WebAdmin — Standalone
 
+## Versão estável v0.1.3
+
+**Release estável:** [v0.1.3](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3). Consolidada a partir da RC9 depois de validações LAN, HTTPS/WebAdmin sem Basic Auth, VAAPI, reprodução/transcoding/retoma, observação NAT-PMP do VPN Gateway v1.0.8, reversão da porta para 6881 e recuperação após reboot dos dois servidores. O Stremio Core mantém a sua versão independente (1.6.34).
+
+**Instalação limpa:** o WebAdmin não exige login na LAN privada identificada (CIDR /24 ou mais restrito); não exponha directamente esta interface à WAN. A atribuição da porta VPN é uma funcionalidade opcional e automática apenas quando há política de host autorizada no Gateway e rede de gestão protegida. A admissão inicial TLS utiliza TOFU e não substitui uma PKI em LAN não fiável. A versão do ProxyWAN é independente.
+
+
 #
 ### Acesso WebAdmin sem password numa LAN de QA
 
@@ -136,7 +143,7 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 Once a source snapshot has been promoted and validated, users can clone the public repository and run its standalone setup on a Debian/Ubuntu host with systemd. Missing Docker, Compose, Nginx, Python, OpenSSL and network utilities are installed by APT:
 
 ```bash
-sudo git clone --branch v0.1.3-rc.9 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
+sudo git clone --branch v0.1.3 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
@@ -155,11 +162,11 @@ A source clone using `--branch v0.1.3-rc.8` is in detached-HEAD state. Do not us
 ```bash
 cd /opt/stremio-server-webadmin
 sudo git fetch origin --tags
-sudo git checkout v0.1.3-rc.9
+sudo git checkout v0.1.3
 sudo sh packaging/stremio-webadmin-setup.sh
 ```
 
-If the checkout reports modified files, **back them up first** (for example `git stash push -u`), then change tag; do not discard local settings or run `docker compose down -v`. The installer does not replace an existing `.env`. For a fresh clone, use the RC9 clone command above.
+If the checkout reports modified files, **back them up first** (for example `git stash push -u`), then change tag; do not discard local settings or run `docker compose down -v`. The installer does not replace an existing `.env`. For a fresh clone, use the stable v0.1.3 clone command above.
 
 The automatic trusted-LAN Gateway observer uses the active IPv4 default next hop. A matching, authorised policy is required in VPN Gateway Multi v1.0.8; if missing or revoked the Stremio BT listen port safely converges to 6881 after a 120-second lease-renewal grace, without changing Gateway routing policies. The first TLS certificate is pinned (TOFU); if the Gateway certificate later changes, the host refuses new observations until trust is explicitly re-established.
 
@@ -168,7 +175,7 @@ The automatic trusted-LAN Gateway observer uses the active IPv4 default next hop
 The Debian/Ubuntu installation command after the first verified release is:
 
 ```bash
-sudo apt install ./stremio-webadmin_0.1.3.rc9_all.deb
+sudo apt install ./stremio-webadmin_0.1.3_all.deb
 sudo stremio-webadmin-setup
 ```
 
