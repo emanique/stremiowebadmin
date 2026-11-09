@@ -149,7 +149,7 @@ unsupported distributions. To require manual provisioning instead, set
 The Debian/Ubuntu installation command after the first verified release is:
 
 ```bash
-sudo apt install ./stremio-webadmin_0.1.3~rc8_all.deb
+sudo apt install ./stremio-webadmin_0.1.3.rc8_all.deb
 sudo stremio-webadmin-setup
 ```
 

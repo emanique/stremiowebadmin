@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ba51e88c4c6c8990f79fecad43bd3d458b3ceb5a
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -35,6 +36,8 @@ jobs:
           bash scripts/build-qa-release.sh "$PWD/release-assets"
           (cd release-assets && sha256sum -c SHA256SUMS)
           dpkg-deb --field release-assets/stremio-webadmin_0.1.3~rc8_all.deb Version | grep -Fx '0.1.3~rc8'
+          mv release-assets/stremio-webadmin_0.1.3~rc8_all.deb release-assets/stremio-webadmin_0.1.3.rc8_all.deb
+          (cd release-assets && sha256sum stremio-webadmin-0.1.3-rc.8-source.tar.gz stremio-webadmin_0.1.3.rc8_all.deb > SHA256SUMS && sha256sum -c SHA256SUMS)
       - name: Publish verified pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,8 +47,8 @@ jobs:
           set -euo pipefail
           cd release-assets
           if gh release view v0.1.3-rc.8 >/dev/null 2>&1; then
-            gh release upload v0.1.3-rc.8 stremio-webadmin-0.1.3-rc.8-source.tar.gz 'stremio-webadmin_0.1.3~rc8_all.deb' SHA256SUMS --clobber
+            gh release upload v0.1.3-rc.8 stremio-webadmin-0.1.3-rc.8-source.tar.gz 'stremio-webadmin_0.1.3.rc8_all.deb' SHA256SUMS --clobber
           else
-            gh release create v0.1.3-rc.8 stremio-webadmin-0.1.3-rc.8-source.tar.gz 'stremio-webadmin_0.1.3~rc8_all.deb' SHA256SUMS --target "$GITHUB_SHA" --title 'Stremio Standalone v0.1.3-rc.8' --prerelease --notes-file ../docs/releases/v0.1.3-rc.8.md
+            gh release create v0.1.3-rc.8 stremio-webadmin-0.1.3-rc.8-source.tar.gz 'stremio-webadmin_0.1.3.rc8_all.deb' SHA256SUMS --target "$GITHUB_SHA" --title 'Stremio Standalone v0.1.3-rc.8' --prerelease --notes-file ../docs/releases/v0.1.3-rc.8.md
           fi
           gh release view v0.1.3-rc.8 --json tagName,isPrerelease,assets,url
