@@ -13,7 +13,7 @@ sudo chmod 600 /etc/stremio-webadmin/access-policy
 sudo python3 /opt/stremio-server-webadmin/scripts/configure-host-https.py --apply
 ```
 
-Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. A opção está disponível no código `main`; **não faz parte do pacote v0.1.3-rc.6 original**, que mantém autenticação obrigatória.
+Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. A opção está disponível no código `main`; **não fazia parte da RC6 original**; confirme a política de acesso efectiva na RC8 antes de disponibilizar a gestão.
 
 
 ## Self-hosted Stremio Core, WebAdmin and WebPlayer with hardware-aware streaming
@@ -32,7 +32,9 @@ Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O 
 
 ---
 
-> **Release status:** the public repository is the installable distribution of the private development project. The first standalone release is being prepared; the documented clone installation depends on Docker and host prerequisites. No GitHub Actions run in this public repository. Production-ready packages must only be attached after local validation, version parity and checksum verification.
+> **Release status:** the public repository is the installable distribution of the private development project. The current standalone RC8 candidate is available; the documented clone installation depends on Docker and host prerequisites. Release automation verifies and publishes packages using GitHub Actions. Production-ready packages must only be attached after local validation, version parity and checksum verification.
+
+**Release RC8:** [v0.1.3-rc.8 e packages](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3-rc.8). Contém registo HLS para entradas IPTV/HTTP sem infohash, associação dos processos FFmpeg às sessões e limpeza do registo após GC. Mantém a correcção do monitor de processos não registados da RC7. A promoção é candidata e não certificação de produção; testes prolongados de dispositivos IPTV, renovações de porta e avaliação completa de instalação limpa continuam distintos dos testes dirigidos executados.
 
 ## ✨ Features
 
@@ -130,7 +132,7 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 Once a source snapshot has been promoted and validated, users can clone the public repository and run its standalone setup on a Debian/Ubuntu host with systemd. Missing Docker, Compose, Nginx, Python, OpenSSL and network utilities are installed by APT:
 
 ```bash
-sudo git clone --branch v0.1.3-rc.6 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
+sudo git clone --branch v0.1.3-rc.8 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
@@ -147,7 +149,7 @@ unsupported distributions. To require manual provisioning instead, set
 The Debian/Ubuntu installation command after the first verified release is:
 
 ```bash
-sudo apt install ./stremio-webadmin_<release>_all.deb
+sudo apt install ./stremio-webadmin_0.1.3~rc8_all.deb
 sudo stremio-webadmin-setup
 ```
 
@@ -173,11 +175,11 @@ For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token,
 
 ## 🧪 Release readiness
 
-**Public source candidate:** standalone `0.1.3-rc.6` (WebAdmin `3.0.14`, Core `1.6.34`). **The current frozen Python 3.12 regression passed on Debian 13 QA: 1,629 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
+**Public pre-release candidate (RC8):** standalone `0.1.3-rc.8` (WebAdmin `3.0.14`, Core `1.6.34`). **Historical RC6 QA evidence (not a new RC8 full-suite claim):** The frozen Python 3.12 regression passed on Debian 13 QA: 1,629 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
 
 A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
 
-The private development repository is [emanique/StremioServerWebAdmin](https://github.com/emanique/StremioServerWebAdmin) and is the sole source of truth. The public repository is a read-only distribution model for consumers (clone, setup and tagged packages), with **no GitHub Actions**. Development, tests, release candidates and quality gates run privately or locally. Promotion copies only approved source, documentation and install assets from an exact Git commit; the README and release version must match, and .env, credentials, keys, caches, test outputs and internal tooling must be excluded. See [Release and promotion process](docs/RELEASE_PROCESS.md).
+The private development repository is [emanique/StremioServerWebAdmin](https://github.com/emanique/StremioServerWebAdmin) and is the sole source of truth. The public repository is a read-only distribution model for consumers (clone, setup and tagged packages), with a release-only GitHub Actions workflow. Development, tests, release candidates and quality gates run privately or locally. Promotion copies only approved source, documentation and install assets from an exact Git commit; the README and release version must match, and .env, credentials, keys, caches, test outputs and internal tooling must be excluded. See [Release and promotion process](docs/RELEASE_PROCESS.md).
 
 The initial source audit also identifies open acceptance items: extended IPTV playback in a real client, second-host clean installation, real authenticated Gateway port changes, and immutable GHCR image distribution. These are **not** claimed as completed.
 
