@@ -16,27 +16,27 @@ It is **not** an immutable GHCR deployment. It preserves an existing host
 IP/BitTorrent port instead of silently resetting them. Never use
 `docker compose down -v` during a routine upgrade.
 
-For a public-source checkout (no private repository access required):
+For a **fresh source installation** using the public repository (no access to
+the private development repository is needed), start with a clean Debian or
+Ubuntu host with `git` installed. The default host installation root is
+`/opt/stremio-server-webadmin`, so clone directly into that directory:
 
 ```sh
-git clone https://github.com/emanique/stremiowebadmin.git
-cd stremiowebadmin
-cp .env.example .env
-sudo python3 scripts/configure-host-https.py --apply
-sh start.sh
-# For host-level reconciliation and required OS packages (after choosing the
-# installation directory):
+sudo apt-get update
+sudo apt-get install -y git
+sudo git clone --branch main --single-branch \
+  https://github.com/emanique/stremiowebadmin.git \
+  /opt/stremio-server-webadmin
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
-For private local development:
-```sh
-git clone -b develop git@github.com:emanique/StremioServerWebAdmin.git
-cd StremioServerWebAdmin
-cp .env.example .env
-sudo python3 scripts/configure-host-https.py --apply
-sh start.sh
-```
+The setup script installs or checks Debian/Ubuntu prerequisites, creates a
+protected `.env` only when absent, configures host HTTPS, validates settings,
+starts the Compose deployment and enables the host reconciliation timer.
+**Do not run this clone command over an existing installation**. For upgrades,
+follow `docs/UPGRADE_GUIDE.md` and preserve the existing `.env` and volumes.
+To use a different destination, set `STREMIO_INSTALL_ROOT` consistently for
+the setup script and its companion services.
 
 ## Network and administration
 
