@@ -101,6 +101,7 @@ services:
     - stremio-config:/config
     - /var/run/docker.sock:/var/run/docker.sock
     - /var/lib/stremio-webadmin/port-status.json:/var/lib/stremio-webadmin/port-status.json:ro
+    - ${STREMIOSRV_SUBTITLE_MODELS_DIR:-./models/subtitles}:/opt/stremio-subtitle-models:ro
     networks:
     - stremio-net
     depends_on:
