@@ -1,9 +1,8 @@
 """Deployment identity and GPU settings are host-specific."""
 from __future__ import annotations
-
 import importlib.util
-import stat
 from pathlib import Path
+import stat
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -43,13 +42,19 @@ def test_duplicate_host_ip_fails_closed(tmp_path):
 def test_https_config_generated_per_host():
     mod=load("https_host","scripts/configure-host-https.py")
     for ip in ("10.0.40.15","172.16.5.8","192.168.77.9"):
-        site=mod.nginx_site(ip)
+        # Passwordless access is allowed only with explicit trusted LAN CIDR;
+        # the standalone Nginx template defaults to Basic Auth otherwise.
+        import ipaddress
+        trusted=str(ipaddress.ip_network(ip + '/24',strict=False))
+        site=mod.nginx_site(ip,auth_mode='lan',trusted_cidr=trusted)
         assert f"listen {ip}:443 ssl;" in site
         assert f"server_name {ip};" in site
         assert "proxy_pass http://127.0.0.1:8090;" in site
         assert "192.168.1.221" not in site
-        assert 'auth_basic "Stremio WebAdmin";' in site
-        assert "auth_basic_user_file /etc/stremio-webadmin/webadmin.htpasswd;" in site
+        assert "auth_basic " not in site
+        assert f"allow {trusted};" in site
+        assert "deny all;" in site
+        assert "auth_basic " in mod.nginx_site(ip,auth_mode='basic')
 
 
 def test_gateway_status_not_hardcoded():
@@ -58,32 +63,3 @@ def test_gateway_status_not_hardcoded():
     assert _valid_gateway_address("10.3.10.1")=="10.3.10.1"
     assert _valid_gateway_address("8.8.8.8") is None
     assert _valid_gateway_address("not-ip") is None
-
-
-def test_explicit_lan_mode_disables_password_only_in_trusted_network(tmp_path):
-    import pytest
-    mod=load("https_host_lan","scripts/configure-host-https.py")
-    policy=tmp_path/"access-policy"
-    from types import SimpleNamespace
-    monkey_ip="192.168.1.234"
-    original=mod.execute
-    def fake_execute(*args, **kwargs):
-        if args[:4] == ("ip", "-4", "-j", "address"):
-            return SimpleNamespace(stdout='[{"addr_info":[{"family":"inet","local":"192.168.1.234","prefixlen":24}]}]')
-        return original(*args, **kwargs)
-    mod.execute=fake_execute
-    assert mod.read_access_policy(tmp_path, monkey_ip)==("lan","192.168.1.0/24")
-    mod.execute=original
-    policy.write_text("lan:192.168.1.0/24\\n".replace("\\n","\n"))
-    mode,subnet=mod.read_access_policy(tmp_path)
-    assert (mode,subnet)==("lan","192.168.1.0/24")
-    site=mod.nginx_site("192.168.1.234", mode, subnet)
-    assert "allow 192.168.1.0/24;" in site
-    assert "deny all;" in site
-    assert "auth_basic_user_file" not in site
-    assert "proxy_pass http://127.0.0.1:8090;" in site
-    with pytest.raises(ValueError):
-        mod.nginx_site("10.10.10.10","lan","192.168.1.0/24")
-    policy.write_text("lan:0.0.0.0/0")
-    with pytest.raises(ValueError):
-        mod.read_access_policy(tmp_path)

@@ -66,10 +66,15 @@ class FakeEngine:
         return {}
 
 
-def _signed_in(tmp_path, monkeypatch, engine):
+def _signed_in(tmp_path, monkeypatch, engine, *, reserve=False):
     monkeypatch.setattr(lib.certcheck, "cert_san", lambda p: "DNS:stremio.example.com")
     monkeypatch.setattr(lib.stremio_api, "get_user", lambda key, **kw: USER)
-    s = Settings(library_ui=True, cache_root=str(tmp_path))
+    # Tests run on a constrained temporary filesystem, not the host data
+    # volume. Disable the production-sized free-space reserve in these unit
+    # fixtures while preserving the independent admission-policy tests.
+    s = Settings(library_ui=True, cache_root=str(tmp_path),
+                 host_min_free_gb=10 if reserve else 0,
+                 host_min_free_percent=10 if reserve else 0)
     c = TestClient(create_app(settings=s, engine=engine), base_url="https://testserver")
     c.post("/library/api/session", json={"authKey": "good"}, headers=HTTPS)
     return c
@@ -83,7 +88,11 @@ def ctx(tmp_path, monkeypatch):
 
 def test_download_requires_a_session(tmp_path, monkeypatch):
     monkeypatch.setattr(lib.certcheck, "cert_san", lambda p: "DNS:stremio.example.com")
-    s = Settings(library_ui=True, cache_root=str(tmp_path))
+    # Tests run on a constrained temporary filesystem, not the host data
+    # volume. Disable the production-sized free-space reserve in these unit
+    # fixtures while preserving the independent admission-policy tests.
+    s = Settings(library_ui=True, cache_root=str(tmp_path),
+                 host_min_free_gb=0, host_min_free_percent=0)
     c = TestClient(create_app(settings=s, engine=FakeEngine()), base_url="https://testserver")
     assert c.post("/library/api/download", json={"magnet": MAGNET},
                   headers=HTTPS).status_code == 401
@@ -149,7 +158,11 @@ def test_a_download_is_not_subject_to_the_pin_disk_guard(tmp_path, monkeypatch):
 def test_download_without_an_engine_is_503(tmp_path, monkeypatch):
     monkeypatch.setattr(lib.certcheck, "cert_san", lambda p: "DNS:stremio.example.com")
     monkeypatch.setattr(lib.stremio_api, "get_user", lambda key, **kw: USER)
-    s = Settings(library_ui=True, cache_root=str(tmp_path))
+    # Tests run on a constrained temporary filesystem, not the host data
+    # volume. Disable the production-sized free-space reserve in these unit
+    # fixtures while preserving the independent admission-policy tests.
+    s = Settings(library_ui=True, cache_root=str(tmp_path),
+                 host_min_free_gb=0, host_min_free_percent=0)
     c = TestClient(create_app(settings=s, engine=None), base_url="https://testserver")
     c.post("/library/api/session", json={"authKey": "good"}, headers=HTTPS)
     assert c.post("/library/api/download", json={"magnet": MAGNET},
@@ -370,7 +383,11 @@ def test_unpin_keeps_the_files(ctx):
 
 def test_pin_requires_a_session(tmp_path, monkeypatch):
     monkeypatch.setattr(lib.certcheck, "cert_san", lambda p: "DNS:stremio.example.com")
-    s = Settings(library_ui=True, cache_root=str(tmp_path))
+    # Tests run on a constrained temporary filesystem, not the host data
+    # volume. Disable the production-sized free-space reserve in these unit
+    # fixtures while preserving the independent admission-policy tests.
+    s = Settings(library_ui=True, cache_root=str(tmp_path),
+                 host_min_free_gb=0, host_min_free_percent=0)
     c = TestClient(create_app(settings=s, engine=FakeEngine()), base_url="https://testserver")
     assert c.post("/library/api/pin", json={"infoHash": IH}, headers=HTTPS).status_code == 401
 
@@ -379,7 +396,7 @@ def test_download_rejects_before_engine_add_when_host_reserve_would_be_entered(
     tmp_path, monkeypatch
 ):
     eng = FakeEngine()
-    c = _signed_in(tmp_path, monkeypatch, eng)
+    c = _signed_in(tmp_path, monkeypatch, eng, reserve=True)
 
     monkeypatch.setattr(
         lib.statemod,
@@ -420,7 +437,7 @@ def test_download_accepts_when_candidate_preserves_host_reserve(
     tmp_path, monkeypatch
 ):
     eng = FakeEngine()
-    c = _signed_in(tmp_path, monkeypatch, eng)
+    c = _signed_in(tmp_path, monkeypatch, eng, reserve=True)
 
     monkeypatch.setattr(
         lib.statemod,
@@ -452,7 +469,7 @@ def test_unknown_download_size_is_rejected_if_committed_space_reaches_reserve(
     tmp_path, monkeypatch
 ):
     eng = FakeEngine()
-    c = _signed_in(tmp_path, monkeypatch, eng)
+    c = _signed_in(tmp_path, monkeypatch, eng, reserve=True)
 
     monkeypatch.setattr(
         lib.statemod,

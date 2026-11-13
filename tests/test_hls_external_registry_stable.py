@@ -52,12 +52,12 @@ def test_external_media_master_registers_real_hls_session(tmp_path, monkeypatch)
                     {"index": 1, "track": "audio", "codec": "aac"}],
     })
     app = create_app(converter=FakeConverter())
-    response = TestClient(app).get("/hlsv2/iptv-job/master.m3u8",
+    response = TestClient(app).get("/hlsv2/external-job/master.m3u8",
         params={"mediaURL": "https://example.org/live-channel.ts"},
         headers={"user-agent": "Mozilla/5.0"})
     assert response.status_code == 200, response.text
     active = app.state.playback_registry.snapshot()["active"]
     assert len(active) == 1
-    assert active[0]["jobId"] == "iptv-job"
+    assert active[0]["jobId"] == "external-job"
     assert active[0]["workloadId"] == "workload-external"
     assert active[0]["infoHash"] == ""

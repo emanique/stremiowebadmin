@@ -38,3 +38,26 @@ dist/
 
 .test-tmp/
 reports/
+
+# IPTV: provider-specific playlists, URLs and secrets belong ONLY to local volumes.
+**/*.m3u
+**/*.m3u8
+!tests/fixtures/*.m3u8
+**/iptv-local.json
+**/iptv-channel-preferences.json
+**/iptv-credentials*.json
+**/playlist-credentials*.txt
+
+# Offline subtitle models are external verified binary artifacts, not source code.
+models/
+**/*.argosmodel
+**/*.srt
+**/*.ass
+**/*.ssa
+**/*.vtt
+# QA-only container layouts and local certificate/backup material
+Dockerfile.qa250
+Dockerfile.subtitle-overlay
+upgrade.compose.yaml
+**/*.pem
+**/*.key

@@ -515,6 +515,9 @@ def streams_for_meta_id(state: dict, meta_id: str, origin: str) -> list[dict]:
             # Keep the source identity beside the stream only while ordering this response.  It is
             # removed before returning, so the Stremio addon contract remains unchanged.
             stream["_lastSourceAt"] = label.get("lastSourceAt") if own else None
+            if own and isinstance(label.get("preferredFileIdx"), int) and (
+                    stream["url"].endswith("/" + str(label["preferredFileIdx"]))):
+                stream["title"] = "★ Em cache no servidor · Última fonte utilizada\n" + stream["title"]
             out.append(stream)
     out.sort(key=lambda s: s.get("_lastSourceAt") if isinstance(s.get("_lastSourceAt"), int) else -1,
              reverse=True)

@@ -83,6 +83,8 @@ DESCRIPTIONS = {
     "library_owner": "Conta Stremio autorizada a gerir a biblioteca.",
     "library_allow_http": "Permite autenticação da biblioteca por HTTP numa LAN confiável.",
     "library_addon_allow": "Redes CIDR autorizadas a aceder ao addon da biblioteca.",
+    "subtitle_source_addons": "URLs HTTPS dos manifestos de addons de legendas de origem (separadas por vírgula). A tradução é local.",
+    "subtitle_device": "Motor local de tradução: auto (CUDA quando disponível, senão CPU), cpu ou cuda. Independente de VAAPI.",
 }
 DEFAULTS = {
     "http_port": 11470,
@@ -126,6 +128,8 @@ DEFAULTS = {
     "library_owner": "",
     "library_allow_http": False,
     "library_addon_allow": "",
+    "subtitle_source_addons": "https://opensubtitles-v3.strem.io/manifest.json",
+    "subtitle_device": "auto",
 }
 MINUTES = {
     "cache_evict_interval",
@@ -540,6 +544,34 @@ def config():
     return {"items": items}
 
 
+def _check_subtitle_source_setting(values: dict) -> None:
+    """Reject unsafe or malformed subtitle provider manifests before persistence."""
+    if "subtitle_source_addons" not in values:
+        return
+    from urllib.parse import urlsplit
+
+    raw = values["subtitle_source_addons"]
+    if not isinstance(raw, str) or len(raw) > 4096:
+        raise HTTPException(400, "subtitle source configuration must be a short text value")
+    entries = [item.strip() for item in raw.split(",") if item.strip()]
+    if len(entries) > 3:
+        raise HTTPException(400, "no more than three subtitle providers")
+    for item in entries:
+        try:
+            parsed = urlsplit(item)
+            valid = (
+                parsed.scheme == "https" and bool(parsed.hostname)
+                and parsed.username is None and parsed.password is None
+                and not parsed.query and not parsed.fragment
+                and parsed.path.endswith("/manifest.json")
+                and parsed.port in (None, 443)
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise HTTPException(400, "subtitle providers require an HTTPS /manifest.json URL")
+
+
 @app.put("/api/config")
 def save_config(body: Values):
     unknown = set(body.values) - set(DEFAULTS)
@@ -548,6 +580,9 @@ def save_config(body: Values):
         raise HTTPException(400, f"unknown settings: {', '.join(sorted(unknown))}")
     if locked:
         raise HTTPException(400, f"read-only settings: {', '.join(sorted(locked))}")
+    _check_subtitle_source_setting(body.values)
+    if "subtitle_device" in body.values and body.values["subtitle_device"] not in ("auto", "cpu", "cuda"):
+        raise HTTPException(400, "subtitle_device must be auto, cpu or cuda")
     try:
         persisted = write_config(body.values)
         _verify_server_config(body.values)
@@ -565,6 +600,7 @@ def save_config(body: Values):
 @app.put("/api/settings")
 def save_settings(body: SettingsBody):
     values = body.model_dump()
+    _check_subtitle_source_setting(values)
     try:
         persisted = write_config(values)
         _verify_server_config(values)
@@ -917,3 +953,107 @@ def qr():
         out, kind="svg", scale=5, border=2
     )
     return Response(out.getvalue(), media_type="image/svg+xml")
+
+
+# Subtitle Translator preferences are independent of global Stremio settings.
+# A save must never recreate the Core or touch the HLS/download caches.
+_SUBTITLE_SETTINGS_FILE = Path('/config/subtitle-translator-settings.json')
+_SUBTITLE_MODEL_ROOT = Path('/opt/stremio-subtitle-models')
+_SUBTITLE_DEFAULT_ORDER = ('en', 'fr', 'es')
+_SUBTITLE_NAMES = {
+ 'en':'Inglês', 'fr':'Francês', 'es':'Espanhol', 'de':'Alemão', 'it':'Italiano',
+ 'ru':'Russo', 'nl':'Neerlandês', 'pl':'Polaco', 'ar':'Árabe', 'zh':'Chinês',
+ 'ja':'Japonês', 'tr':'Turco', 'uk':'Ucraniano', 'pt':'Português', 'bg':'Búlgaro',
+ 'cs':'Checo', 'da':'Dinamarquês', 'fi':'Finlandês', 'el':'Grego', 'he':'Hebraico',
+ 'hi':'Hindi', 'hu':'Húngaro', 'id':'Indonésio', 'ko':'Coreano', 'ro':'Romeno',
+ 'sk':'Eslovaco', 'sl':'Esloveno', 'sv':'Sueco', 'th':'Tailandês', 'vi':'Vietnamita',
+ 'ca':'Catalão', 'eu':'Basco', 'gl':'Galego', 'nb':'Norueguês', 'fa':'Persa',
+ 'bn':'Bengali', 'sq':'Albanês', 'az':'Azeri', 'eo':'Esperanto', 'et':'Estónio',
+ 'ga':'Irlandês', 'ky':'Quirguiz', 'lv':'Letão', 'lt':'Lituano', 'ms':'Malaio',
+ 'sw':'Suaíli', 'tl':'Tagalo', 'ur':'Urdu', 'zt':'Chinês tradicional', 'pb':'Português do Brasil',
+}
+
+
+def _installed_subtitle_pairs() -> set[tuple[str,str]]:
+    try:
+        return {
+            tuple(folder.name.split('_',1)) for folder in _SUBTITLE_MODEL_ROOT.iterdir()
+            if (folder.is_dir() and not folder.is_symlink() and
+                re.fullmatch(r'[a-z]{2}_[a-z]{2}', folder.name) and
+                all((folder / rel).is_file() for rel in
+                    ('model/model.bin','model/config.json','sentencepiece.model')))
+        }
+    except OSError:
+        return set()
+
+
+def _installed_subtitle_languages() -> tuple[str,...]:
+    pairs = _installed_subtitle_pairs()
+    supported = {
+      src for src,_ in pairs
+      if src != 'pt' and ((src,'pt') in pairs or ((src,'en') in pairs and ('en','pt') in pairs))
+    }
+    return tuple(x for x in _SUBTITLE_DEFAULT_ORDER if x in supported) + tuple(sorted(supported.difference(_SUBTITLE_DEFAULT_ORDER)))
+
+
+
+class SubtitleLanguageConfig(BaseModel):
+    languages: list[str]
+
+
+def _read_subtitle_languages() -> list[str]:
+    try:
+        payload = json.loads(_SUBTITLE_SETTINGS_FILE.read_text('utf-8'))
+        values = payload.get('languages')
+        installed = _installed_subtitle_languages()
+        if (isinstance(values, list) and len(values) == len(set(map(str, values)))
+                and all(isinstance(value, str) and value in installed for value in values)):
+            return values
+    except (OSError, ValueError, TypeError):
+        pass
+    return list(_installed_subtitle_languages())
+
+
+@app.get('/api/subtitle-translator/config')
+def subtitle_translator_config():
+    return {
+        'target': 'pt-PT',
+        'languages': _read_subtitle_languages(),
+        'available': [
+            {'code': code,
+             'name': _SUBTITLE_NAMES.get(code, code.upper()),
+             'route': code + (' → pt-PT' if (code,'pt') in _installed_subtitle_pairs()
+                     else ' → en → pt-PT'),
+             'model': code + ('_pt' if (code,'pt') in _installed_subtitle_pairs()
+                            else '_en + en_pt'),
+             'installed': True}
+            for code in _installed_subtitle_languages()
+        ],
+        'notInstalled': [],
+        'cache': 'persistent-download-title-bound',
+        'selectionMode': 'manual',
+    }
+
+
+@app.put('/api/subtitle-translator/config')
+def save_subtitle_translator_config(body: SubtitleLanguageConfig):
+    langs = body.languages
+    if (len(langs) != len(set(langs)) or
+            any(type(code) is not str or code not in _installed_subtitle_languages() for code in langs)):
+        raise HTTPException(400, 'Only unique installed source languages are allowed')
+    with CONFIG_LOCK:
+        _SUBTITLE_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = json.dumps({'languages': langs, 'target': 'pt-PT'}, separators=(',', ':'))
+        fd, tmp = tempfile.mkstemp(prefix='.subtitle-translator-', suffix='.tmp', dir=_SUBTITLE_SETTINGS_FILE.parent)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, _SUBTITLE_SETTINGS_FILE)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+    audit('subtitle-translator.sources.update', ','.join(langs) or 'none')
+    return {'ok': True, 'languages': langs, 'restartRequired': False}

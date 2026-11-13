@@ -276,6 +276,21 @@ def serve(info_hash: str, idx: int, request: Request):
         # `.close()` on an already-exhausted generator is a documented no-op, so this costs nothing
         # on the normal-completion path.
         eng.note_stream_open(h)
+        # Record only real client playback, not FFmpeg's internal HLS reads.
+        # This is a server-side preference, visible to all clients using the
+        # shared My Library addon, even after the browser/device changes.
+        if 'ffmpeg' not in (request.headers.get('User-Agent') or '').lower() and not (request.headers.get('User-Agent') or '').startswith('Lavf/'):
+            try:
+                from stremiosrv.library.labels import record_played_source
+                # A recorded release inside a pack is not necessarily the
+                # same episode/file being streamed. Single-file movies are
+                # unambiguous; do not mutate a pack's preferred selection.
+                torrent_file = getattr(h, 'torrent_file', None)
+                ti = torrent_file() if callable(torrent_file) else None
+                if ti and ti.files().num_files() == 1:
+                    record_played_source(settings.cache_root,info_hash,idx)
+            except (OSError, ValueError, TypeError):
+                pass  # Playback must never fail because preference storage failed.
         registry = _playback_registry(request)
         session_id = (
             registry.open_source(info_hash, idx, request.headers.get("User-Agent"))

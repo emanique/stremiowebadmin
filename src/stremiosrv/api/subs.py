@@ -14,6 +14,7 @@ from collections import OrderedDict
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from stremiosrv import metrics
 from stremiosrv.api.media_fetch import resolve_media_input
@@ -262,10 +263,22 @@ def subtitles_proxy(ext: str, request: Request, source: str = Query(alias="from"
         resp.close()
         conn.close()
     text = decode_subtitle(_decompress(raw, content_encoding))
+    # Capture only after the original response is sent; never add latency or
+    # change subtitles requested by another Stremio addon.
+    background = None
+    try:
+        from stremiosrv.subtitle_translator.captured import unique_playing_hash, capture
+        owner = unique_playing_hash(request)
+        if owner and source.lower().startswith('https://') and len(text.encode('utf-8')) <= 4 * 1024 * 1024:
+            background = BackgroundTask(capture, request.app.state.settings.cache_root,
+                                        owner, source, text.encode('utf-8'))
+    except Exception:
+        logger.debug('subtitle capture not scheduled', exc_info=True)
     if ext.lower() == "vtt":
         # charset=utf-8 so strict players (ExoPlayer) don't second-guess the encoding.
-        return Response(content=rebase_webvtt(to_webvtt(text), max(0, min(int(startTime), 86400000)) / 1000.0), media_type="text/vtt; charset=utf-8")
-    return Response(content=text, media_type="application/x-subrip; charset=utf-8")
+        return Response(content=rebase_webvtt(to_webvtt(text), max(0, min(int(startTime), 86400000)) / 1000.0),
+                        media_type="text/vtt; charset=utf-8", background=background)
+    return Response(content=text, media_type="application/x-subrip; charset=utf-8", background=background)
 
 
 def _ensure_edges(handle, idx: int, edge: int = 65536, timeout: float = 15.0) -> bool:

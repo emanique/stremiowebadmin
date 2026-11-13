@@ -21,10 +21,19 @@ services:
       STREMIOSRV_TRANSCODE_GC_MAX_AGE: ${STREMIOSRV_TRANSCODE_GC_MAX_AGE:-600}
       IPADDRESS: ${IPADDRESS:-}
       SERVER_URL: ${SERVER_URL:-}
+      STREMIOSRV_IPTV_ENABLED: ${STREMIOSRV_IPTV_ENABLED:-true}
+      STREMIOSRV_IPTV_CONFIG: /config/iptv-local.json
+      STREMIOSRV_IPTV_PUBLIC_ORIGIN: ${STREMIOSRV_IPTV_PUBLIC_ORIGIN:-}
+      STREMIOSRV_IPTV_UPLOAD: /config/iptv-playlist-upload.m3u
+      STREMIOSRV_IPTV_PREFERENCES: /config/iptv-channel-preferences.json
       STREMIOSRV_LIBRARY_UI: ${STREMIOSRV_LIBRARY_UI:-true}
       STREMIOSRV_LIBRARY_ALLOW_HTTP: ${STREMIOSRV_LIBRARY_ALLOW_HTTP:-false}
       STREMIOSRV_LIBRARY_OWNER: ${STREMIOSRV_LIBRARY_OWNER:-}
       STREMIOSRV_LIBRARY_ADDON_ALLOW: ${STREMIOSRV_LIBRARY_ADDON_ALLOW:-}
+      STREMIOSRV_SUBTITLE_MODELS_ROOT: /opt/stremio-subtitle-models
+      STREMIOSRV_SUBTITLE_PUBLIC_ORIGIN: ${STREMIOSRV_SUBTITLE_PUBLIC_ORIGIN:-}
+      STREMIOSRV_SUBTITLE_CPU_THREADS: ${STREMIOSRV_SUBTITLE_CPU_THREADS:-2}
+      STREMIOSRV_SUBTITLE_DEVICE: ${STREMIOSRV_SUBTITLE_DEVICE:-auto}
       TRANSCODING_MODE: ${TRANSCODING_MODE:-auto}
       TRANSCODING_HWACCEL: ${TRANSCODING_HWACCEL:-auto}
       VAAPI_DEVICE: ${VAAPI_DEVICE:-}
@@ -39,6 +48,7 @@ services:
       TRANSCODING_HW_DECODE: ${TRANSCODING_HW_DECODE:-false}
     volumes:
     - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
+    - ${STREMIOSRV_SUBTITLE_MODELS_DIR:-./models/subtitles}:/opt/stremio-subtitle-models:ro
     - stremio-config:/config:ro
     healthcheck:
       test:
@@ -70,6 +80,9 @@ services:
       WEBADMIN_STATE: /data
       STREMIO_CONFIG_FILE: /config/admin-settings.json
       STREMIO_URL: http://stremio-libtorrent-server:11470
+      IPTV_CONFIG_FILE: /config/iptv-local.json
+      IPTV_PREFERENCES_FILE: /config/iptv-channel-preferences.json
+      IPTV_UPLOAD_FILE: /config/iptv-playlist-upload.m3u
       STREMIO_CONTAINER: stremio-libtorrent-server
       STREMIO_IMAGE: stremioserverwebadmin-core:dev
       WEBADMIN_IMAGE: stremioserverwebadmin-webadmin:dev

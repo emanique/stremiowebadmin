@@ -10,6 +10,10 @@
     :root{--bg:#06100a;--panel:#102018;--card:rgba(14,28,21,.94);--line:#516b3a;--text:#fffdf3;--muted:#c9c2a2;--aqua:#f2c94c;--green:#42d477;--purple:#c92f3b;--purple2:#8d1f29;--teal:#173f28;--danger:#ff5964}body{background:linear-gradient(115deg,rgba(3,18,9,.94),rgba(38,5,8,.88)),url('theme-background.jpg') center/cover fixed no-repeat}.brand{color:#f4d35e;text-shadow:0 2px 16px rgba(0,0,0,.8)}.panel{background:linear-gradient(155deg,rgba(10,35,20,.96),rgba(49,10,15,.93));border-color:rgba(220,190,76,.42);backdrop-filter:blur(8px)}.inner,.statuscard,.stream,.configItem,.cacheSummary,.notice{background:rgba(15,24,18,.92);border-color:rgba(232,207,105,.25)}.foot{background:rgba(5,27,16,.94);border-color:rgba(232,207,105,.25)}.settings{background:linear-gradient(145deg,rgba(17,79,43,.96),rgba(91,17,25,.94));border-color:#b89835}.settings .foot{background:rgba(39,8,12,.92)}.btn{background:#b72b36}.btn:hover{background:#d13a45}.btn.ghost,.mini,.logSource{background:#173523;border-color:#6e783d}.tab.active,.copy:hover{color:#f4d35e}.badge{background:#123f25;border-color:#3da864}.progress i,.cacheTrack i{background:linear-gradient(90deg,#159447 0 38%,#f2c94c 38% 50%,#c92f3b 50% 100%)}.field,.metric,.cert,.control input,.configItem input[type=text],.configItem input[type=number]{background:rgba(13,30,21,.95);border-color:rgba(229,198,74,.26)}.logViewer{background:rgba(2,8,5,.96);border-color:#827632}.logSource.active{background:#533019;border-color:#f2c94c;color:#ffe77a}.configTools{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;margin:16px 0}.configSearch{width:100%;padding:11px 13px;border:1px solid rgba(229,198,74,.3);border-radius:8px;background:rgba(13,30,21,.95);color:var(--text)}.configSummary{align-self:center;color:var(--muted);font-size:12px;white-space:nowrap}.configGrid{display:block}.configGroup{margin:0 0 14px;border:1px solid rgba(232,207,105,.25);border-radius:12px;background:rgba(6,22,13,.55);overflow:hidden}.configGroup summary{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;font-weight:800;color:#f4d35e;list-style:none}.configGroup summary::-webkit-details-marker{display:none}.configGroup summary:before{content:'›';font-size:20px;transition:.2s}.configGroup[open] summary:before{transform:rotate(90deg)}.configGroup summary small{margin-left:auto;color:var(--muted);font-weight:500}.configGroupGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:0 12px 12px}.configItem{position:relative}.configItem label{padding-right:72px}.configType{position:absolute;right:12px;top:12px;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.08em}.configEmpty{padding:35px;text-align:center;color:var(--muted)}@media(max-width:700px){.configTools{grid-template-columns:1fr}.configSummary{white-space:normal}.configGroupGrid{grid-template-columns:1fr}.configGroup summary small{display:none}}
     .brand{font-size:22px;letter-spacing:.16em;line-height:1.05}.versionStrip{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.versionChip{padding:3px 8px;border:1px solid rgba(232,207,105,.32);border-radius:99px;background:rgba(6,22,13,.72);color:#fff7d6;font-size:10px;letter-spacing:.04em}.versionChip b{color:#f4d35e}.configUnit{margin-left:5px;color:#f4d35e;font-size:10px}
 
+    #iptv .configItem input[type=url]{display:block;width:100%;background:#12251b;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px}
+    #iptv .configSearch{max-width:440px}
+    #iptvChannels .stream{display:flex;justify-content:space-between;gap:12px}
+    #iptvChannels .stream strong{overflow-wrap:anywhere}
     /* Compact dashboard: prioritize operational data above the fold. */
     #dashboard{grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr);gap:14px;align-items:start}
     #dashboard .stack{gap:14px}
@@ -38,7 +42,7 @@
 </head>
 <body><main class="shell">
   <div class="top"><div><div class="brand">STREMIO SERVER WEB ADMIN</div><div class="versionStrip"><span class="versionChip">WebAdmin <b id="headerForkVersion">—</b></span><span class="versionChip">Stremio Core <b id="headerCoreVersion">—</b></span></div></div><small id="refreshed">Connecting…</small></div>
-  <nav class="tabs"><button class="tab active" data-page="dashboard">Dashboard</button><button class="tab" data-page="configuration">All configuration</button><button class="tab" data-page="logs">Logs</button></nav>
+  <nav class="tabs"><button class="tab active" data-page="dashboard">Dashboard</button><button class="tab" data-page="configuration">All configuration</button><button class="tab" data-page="iptv">IPTV</button><button class="tab" data-page="subtitleTranslator">Subtitle Translator</button><button class="tab" data-page="logs">Logs</button></nav>
   <div class="grid page" id="dashboard">
     <section class="stack">
       <article class="panel"><div class="title">HOW TO CONNECT</div><div class="inner connect"><div>
@@ -56,6 +60,63 @@
     </section>
   </div>
   <section class="page hidden" id="configuration"><article class="panel"><div class="title">ALL SERVER PARAMETERS</div><div class="inner configPanel"><div class="toolbar"><div><h2>Runtime configuration</h2><small>Parameters are grouped by function. Boolean values use checkboxes; locked values are shown for reference.</small></div><div class="toolbarActions"><button class="btn" id="saveAll" type="button">Save configuration</button><button class="btn danger" id="restart" type="button">Restart server</button></div></div><div class="configTools"><input class="configSearch" id="configSearch" type="search" placeholder="Search by parameter or description…" autocomplete="off"><span class="configSummary" id="configSummary">Loading parameters…</span></div><div class="configGrid" id="configGrid"><div class="empty">Loading parameters…</div></div><div class="saveState" id="configState"></div></div><div class="foot">Network and parameters marked “restart” are persisted now and take effect after restarting the server.</div></article></section>
+  <section class="page hidden" id="iptv">
+    <article class="panel"><div class="title">IPTV · GESTÃO DA PLAYLIST M3U</div>
+      <div class="inner">
+        <div class="toolbar"><div><h2>IPTV via StremioSRV</h2>
+          <small>Actualizar a lista sem reiniciar o Core nem interromper os torrents.</small>
+        </div><span class="badge" id="iptvBadge">A consultar…</span></div>
+        <div class="configItem"><label for="iptvUrl">Nova playlist M3U ou M3U8 (HTTPS)</label>
+          <small id="iptvHost">As credenciais da lista actual ficam guardadas no servidor.</small>
+          <input id="iptvUrl" type="url" placeholder="https://fornecedor.exemplo/playlist.m3u ou .m3u8" autocomplete="off" spellcheck="false">
+          <small>Deixe vazio para manter o URL actual. Os tokens nunca são devolvidos ao navegador.</small>
+        </div>
+        <div class="configItem">
+          <label for="iptvUpload">Ficheiro local M3U ou M3U8</label>
+          <input id="iptvUpload" type="file" accept=".m3u,.m3u8" autocomplete="off">
+          <small>O ficheiro será guardado exclusivamente no volume privado do servidor. As credenciais nele contidas nunca são incluídas no repositório nem devolvidas ao navegador.</small>
+        </div>
+        <div class="actions" style="flex-wrap:wrap">
+          <button type="button" class="btn ghost" id="iptvUploadButton">Carregar ficheiro M3U/M3U8</button>
+          <button type="button" class="btn ghost" id="iptvTest">Testar ligação</button>
+          <button type="button" class="btn" id="iptvSave">Guardar e actualizar</button>
+          <button type="button" class="btn ghost" id="iptvRefresh">Actualizar canais</button>
+          <label style="display:flex;align-items:center;gap:8px"><input id="iptvEnabled" type="checkbox"> Addon activo</label>
+        </div>
+        <p class="saveState" id="iptvMessage" role="status" aria-live="polite"></p>
+        <div class="cacheSummary">
+          <div class="cacheNumbers"><span>Canais <b id="iptvCount">—</b></span><span>Última sincronização <b id="iptvUpdated">—</b></span><span>Próxima actualização <b id="iptvNext">—</b></span></div>
+          <div id="iptvError" class="hint"></div>
+        </div>
+        <div class="toolbar"><h2>Lista de canais</h2><div class="toolbarActions">
+          <input class="configSearch" id="iptvSearch" type="search" placeholder="Pesquisar nome ou grupo…" autocomplete="off">
+          <select id="iptvSort" aria-label="Ordenação dos canais" style="padding:9px;background:#14251a;color:var(--text);border:1px solid var(--line);border-radius:8px">
+            <option value="number">Número do canal</option><option value="original">Ordem da playlist</option>
+            <option value="name">Nome A-Z</option><option value="group">Grupo</option>
+          </select>
+          <button class="btn ghost" type="button" id="iptvFind">Pesquisar</button>
+          <button class="btn ghost" type="button" id="iptvHidden">Canais removidos</button>
+        </div></div>
+        <div class="configItem"><label>Manifesto do addon IPTV</label>
+          <div class="field"><code id="iptvManifestUrl">Configurar playlist e activar addon para obter o manifesto.</code>
+            <button type="button" class="copy" data-copy="iptvManifestUrl" title="Copiar manifesto">⧉</button></div>
+          <small>O manifesto contém um token de instalação; partilhe apenas com clientes autorizados.</small>
+        </div>
+        <div id="iptvChannels" class="streams"><div class="empty">A carregar canais…</div></div>
+        <div class="actions"><button type="button" class="btn ghost" id="iptvMore">Ver mais</button><span class="saveState" id="iptvPagination"></span></div>
+      </div>
+      <div class="foot">O URL M3U é validado antes de guardar. A configuração anterior é restaurada se a actualização falhar.</div>
+    </article>
+  </section>
+  <section class="page hidden" id="subtitleTranslator">
+    <article class="panel"><div class="title">SUBTITLE TRANSLATOR · CONFIGURAÇÃO</div><div class="inner">
+      <div class="toolbar"><div><h2>Tradução de legendas para português (pt-PT)</h2><small>Escolha as línguas de origem disponíveis e a ordem preferencial. A escolha da legenda no player continua a ser manual.</small></div><span class="badge" id="subtitleTranslatorBadge">A consultar...</span></div>
+      <div class="notice">Complementar aos outros addons. Não altera as legendas originais nem a cache temporária de transcoding. Os SRT traduzidos ficam associados ao filme na cache de download.</div>
+      <div id="subtitleTranslatorLanguages" class="streams" style="margin-top:14px"><div class="empty">A carregar modelos instalados...</div></div>
+      <div class="actions"><button class="btn" id="subtitleTranslatorSave" type="button">Guardar preferências</button><button class="btn ghost" id="subtitleTranslatorReload" type="button">Actualizar estado</button><span class="saveState" id="subtitleTranslatorMessage" role="status" aria-live="polite"></span></div>
+      <div class="notice"><strong>Catálogo dinâmico:</strong> são apresentadas apenas as línguas cujo percurso de tradução local para pt-PT esteja instalado. Modelos em instalação surgirão após actualizar o estado.</div>
+    </div><div class="foot">A configuração é aplicada a novos pedidos de legendas, sem reiniciar o Core. Legendas já traduzidas e guardadas não são apagadas.</div></article>
+  </section>
   <section class="page hidden" id="logs"><article class="panel"><div class="title">LOGS BY SOURCE</div><div class="inner"><div class="toolbar"><div><h2 id="logTitle">Application / Uvicorn</h2><small>Last 300 lines from the selected source.</small></div><div class="toolbarActions"><button class="btn ghost" id="clearSelected">Clean selected</button><button class="btn danger" id="clearAll">Clean all</button></div></div><div class="logSources" id="logSources"></div><pre class="logViewer" id="logViewer">Loading logs…</pre><div class="logMeta" id="logMeta"></div></div><div class="foot">Stremio application output and Web Admin administrative events remain separated by origin.</div></article></section>
 </main><div class="toast" id="toast"></div>
 <script>
@@ -90,13 +151,16 @@ let restartPromise=null;
 async function waitForServerHealthy(timeoutMs=75000){const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){try{const r=await fetch('api/status',{cache:'no-store'});if(r.ok){const data=await r.json();if(data.server&&data.server.healthy)return true}}catch(e){}await new Promise(resolve=>setTimeout(resolve,1000))}return false}
 async function waitForRestart(timeoutMs=75000){const deadline=Date.now()+timeoutMs;while(Date.now()<deadline){try{const r=await fetch('api/restart',{cache:'no-store'});if(r.ok){const s=await r.json();if(s.status==='succeeded')return s;if(s.status==='failed')throw Error(s.detail||'Restart failed')}}catch(e){if(e.message&&e.message!=='Failed to fetch')throw e}await new Promise(resolve=>setTimeout(resolve,1000))}throw Error('Restart did not complete within the timeout')}
 async function restartServer(target){if(restartPromise){target.textContent='Restart already in progress…';toast('Restart already in progress');return restartPromise}const button=$('restart');if(button)button.disabled=true;target.textContent='Restarting server and reloading configuration…';restartPromise=(async()=>{try{const r=await fetch('api/restart',{method:'POST'});let body={};try{body=await r.json()}catch(e){}if(r.status===409&&body.detail==='server restart already in progress'){target.textContent='Restart already in progress. Waiting for completion…';toast('Restart already in progress')}else if(!r.ok){target.textContent=body.detail||'Restart failed';toast('Restart failed');return false}const result=await waitForRestart();target.textContent='Server restarted. Saved configuration is active.';toast('Server restarted');await load();try{await loadConfig()}catch(e){}return !!result}catch(e){target.textContent=e.message||'Restart failed';toast('Restart failed');return false}finally{restartPromise=null;if(button)button.disabled=false}})();return restartPromise}
-document.querySelectorAll('.tab').forEach(tab=>tab.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t===tab));document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));$(tab.dataset.page).classList.remove('hidden');if(tab.dataset.page==='configuration')loadConfig();if(tab.dataset.page==='logs')loadLogs()});
+function iptvActivateFromLink(){if(location.hash==='#iptv'){const tab=document.querySelector('.tab[data-page="iptv"]');if(tab)tab.click()}}
+window.addEventListener('hashchange',iptvActivateFromLink);
+document.querySelectorAll('.tab').forEach(tab=>tab.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t===tab));document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));$(tab.dataset.page).classList.remove('hidden');if(tab.dataset.page==='configuration')loadConfig();if(tab.dataset.page==='logs')loadLogs();if(tab.dataset.page==='iptv'){iptvLoadStatus();iptvLoadChannels(true)}if(tab.dataset.page==='subtitleTranslator')subtitleTranslatorLoad()});
 $('clearSelected').onclick=async()=>{if(!confirm(`Clean all entries from ${$('logTitle').textContent}?`))return;const r=await fetch('api/logs/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:activeLogSource})});if(r.ok){toast('Selected log cleaned');loadLogs()}else{toast('Could not clean log')}};$('clearAll').onclick=async()=>{if(!confirm('Clean every log source now?'))return;const r=await fetch('api/logs/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:null})});if(r.ok){toast('All logs cleaned');loadLogs()}else{toast('Could not clean logs')}};
 async function saveAllConfiguration(){const button=$('saveAll');if(button)button.disabled=true;$('configState').textContent='Saving and verifying persistent configuration…';toast('Saving configuration…');try{const values={};document.querySelectorAll('[data-config]:not(:disabled)').forEach(input=>{values[input.dataset.config]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value)*Number(input.dataset.scale||1):input.value});const r=await fetch('api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values})});let body={};try{body=await r.json()}catch(e){}if(!r.ok){throw Error(body.detail||('Save failed with HTTP '+r.status))}$('configState').textContent=body.restartRequired?'Saved and verified on disk and in the server container. Restart required to apply.':'Saved and applied.';toast('Configuration saved and verified');await loadConfig();if(body.restartRequired&&confirm('Configuration was saved successfully. Restart the Stremio server now to apply it?'))await restartServer($('configState'));return true}catch(e){$('configState').textContent=e.message||'Could not save configuration';toast('Configuration save failed');return false}finally{if(button)button.disabled=false}}
 async function restartFromConfiguration(){if(!confirm('Restart the Stremio server now? Active streams will be interrupted.'))return false;return restartServer($('configState'))}
 $('saveAll').addEventListener('click',saveAllConfiguration);
 $('restart').addEventListener('click',restartFromConfiguration);
 load();
+setTimeout(iptvActivateFromLink,0);
 setInterval(load,5000);
 // Poll Gateway assignment while the configuration page is open. Do not overwrite
 // operator edits: update only the read-only BT listen-port status field.
@@ -112,4 +176,163 @@ setInterval(async()=>{const page=$('configuration');if(!page||page.classList.con
  }catch(e){}},15000);
 
 $('configSearch').addEventListener('input',renderConfig);
+
+let iptvOffset=0, iptvLoaded=0, iptvQuery='', iptvShowHidden=false;
+async function iptvRequest(path,options){
+ const r=await fetch('api/iptv'+path,{cache:'no-store',...options});
+ let payload={};try{payload=await r.json()}catch(e){}
+ if(!r.ok)throw Error(payload.detail||('HTTP '+r.status));
+ return payload;
+}
+function iptvBusy(on){for(const id of ['iptvTest','iptvSave','iptvRefresh','iptvFind','iptvUploadButton'])$(id).disabled=on}
+function iptvNote(message){$('iptvMessage').textContent=message}
+async function iptvLoadStatus(){
+ try{
+  const [data, addonResponse]=await Promise.all([iptvRequest(''),fetch('/api/addons',{cache:'no-store'})]);
+  $('iptvEnabled').checked=!!data.enabled;
+  if(addonResponse.ok){
+   const addons=await addonResponse.json();
+   const addon=(addons.addons||[]).find(a=>a.id==='iptv-local');
+   $('iptvManifestUrl').textContent=addon&&addon.manifestUrl?addon.manifestUrl:'Manifesto indisponível; configure e active o addon.';
+  }
+  $('iptvBadge').textContent=data.enabled?'● Activo':'● Desactivado';
+  $('iptvHost').textContent=data.sourceType==='file'?'Playlist M3U/M3U8 guardada no volume privado do servidor':data.sourceHost?'Fornecedor: '+data.sourceHost+' · URL protegido no servidor':'Lista ainda não configurada';
+  $('iptvCount').textContent=(data.channels??0).toLocaleString('pt-PT');
+  $('iptvUpdated').textContent=data.refreshedAt?new Date(data.refreshedAt*1000).toLocaleString('pt-PT'):'Ainda não sincronizado';
+  $('iptvNext').textContent=(data.nextRefreshSeconds??0)+' s';
+  $('iptvError').textContent=data.lastError||data.lastOperation?.error||'';
+ }catch(e){iptvNote('Estado IPTV: '+e.message)}
+}
+async function iptvLoadChannels(reset=true){
+ if(reset){iptvOffset=0;iptvQuery=$('iptvSearch').value.trim();$('iptvChannels').replaceChildren()}
+ try{
+  const params=new URLSearchParams({q:iptvQuery,skip:String(iptvOffset),limit:'50',order:$('iptvSort').value});
+  const data=iptvShowHidden?await iptvRequest('/hidden'):await iptvRequest('/channels?'+params);
+  const entries=iptvShowHidden?data.items.filter(c=>!iptvQuery||c.name.toLocaleLowerCase().includes(iptvQuery.toLocaleLowerCase())||c.group.toLocaleLowerCase().includes(iptvQuery.toLocaleLowerCase())):data.items;
+  const page=iptvShowHidden?entries.slice(iptvOffset,iptvOffset+50):entries;
+  for(const channel of page){
+   const row=document.createElement('div');row.className='stream';
+   const top=document.createElement('div');top.className='streamtop';
+   const name=document.createElement('strong');name.textContent=channel.name;
+   const position=document.createElement('span');position.className='badge';
+   position.textContent='#'+(channel.rank??channel.number??channel.position);
+   const group=document.createElement('small');group.textContent=channel.group;
+   group.style.color='var(--muted)';
+   top.append(position,name,group);row.appendChild(top);
+   const actions=document.createElement('div');actions.className='actions';actions.style.flexWrap='wrap';
+   if(iptvShowHidden){
+    const restore=document.createElement('button');restore.type='button';restore.className='btn ghost';
+    restore.textContent='Restaurar canal';
+    restore.onclick=()=>iptvChangeChannel(channel.id,'restore');
+    actions.append(restore);
+   }else{
+    const rank=document.createElement('input');rank.type='number';rank.min='1';rank.max='1000000';
+    rank.value=channel.rank??channel.number??channel.position;rank.style.width='90px';
+    rank.title='Número/posição personalizada';rank.setAttribute('aria-label','Número do canal');
+    const save=document.createElement('button');save.type='button';save.className='btn ghost';
+    save.textContent='Guardar posição';
+    save.onclick=()=>iptvChangeChannel(channel.id,'rank',Number(rank.value));
+    const clear=document.createElement('button');clear.type='button';clear.className='btn ghost';
+    clear.textContent='Repor posição';
+    clear.onclick=()=>iptvChangeChannel(channel.id,'clear_rank');
+    const hide=document.createElement('button');hide.type='button';hide.className='btn danger';
+    hide.textContent='Remover canal';
+    hide.onclick=()=>{if(confirm('Remover este canal da lista activa? Pode restaurá-lo depois.'))iptvChangeChannel(channel.id,'hide')};
+    actions.append(rank,save,clear,hide);
+   }
+   row.appendChild(actions);$('iptvChannels').appendChild(row);
+  }
+  iptvOffset+=page.length;
+  const total=iptvShowHidden?entries.length:data.total;
+  $('iptvPagination').textContent=iptvOffset+' de '+total+' canais'+(iptvShowHidden?' removidos':'');
+  $('iptvMore').disabled=iptvOffset>=total;
+  if(total===0)$('iptvChannels').textContent='Não existem canais nesta vista.';
+ }catch(e){iptvNote('Pesquisa de canais: '+e.message)}
+}
+async function iptvChangeChannel(channelId,action,rank){
+ try{
+  const payload={channel_id:channelId,action};
+  if(action==='rank'){
+   if(!Number.isInteger(rank)||rank<1||rank>1000000)throw Error('Indique um número entre 1 e 1000000.');
+   payload.rank=rank;
+  }
+  await iptvRequest('/channel-preferences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  iptvNote(action==='hide'?'Canal removido da lista activa.':action==='restore'?'Canal restaurado.':'Ordenação guardada.');
+  await iptvLoadChannels(true);await iptvLoadStatus();
+ }catch(e){iptvNote('Não foi possível alterar o canal: '+e.message)}
+}
+
+$('iptvUploadButton').onclick=async()=>{
+ const file=$('iptvUpload').files[0];
+ if(!file||!/\.m3u8?$/i.test(file.name)||file.size>8*1024*1024){
+  iptvNote('Seleccione um ficheiro .m3u ou .m3u8 até 8 MiB.');return;
+ }
+ if(!confirm('Substituir a playlist activa pelo ficheiro local? A lista anterior será restaurada se falhar a validação.'))return;
+ iptvBusy(true);iptvNote('A validar e guardar o ficheiro no volume privado…');
+ try{
+  const p=await iptvRequest('/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({name:file.name,text:await file.text()})});
+  $('iptvUpload').value='';
+  iptvNote('Ficheiro carregado: '+p.count+' canais. Credenciais preservadas apenas no servidor.');
+  await iptvLoadStatus();await iptvLoadChannels(true);
+ }catch(e){iptvNote('Falha ao carregar ficheiro; lista anterior preservada. '+e.message)}
+ finally{iptvBusy(false)}
+};
+$('iptvTest').onclick=async()=>{
+ const url=$('iptvUrl').value.trim();if(!url){iptvNote('Introduza o novo URL M3U para testar.');return}
+ iptvBusy(true);iptvNote('A validar a playlist no servidor…');
+ try{const p=await iptvRequest('/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+  iptvNote('Playlist válida: '+p.count+' canais. Pode guardar.');
+ }catch(e){iptvNote('Falha na validação: '+e.message)}finally{iptvBusy(false)}
+};
+$('iptvSave').onclick=async()=>{
+ iptvBusy(true);iptvNote('A validar e guardar, sem reiniciar o Core…');
+ const url=$('iptvUrl').value.trim();
+ try{
+  const p=await iptvRequest('',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url||null,enabled:$('iptvEnabled').checked})});
+  $('iptvUrl').value='';iptvNote(p.changed?'Configuração guardada e aplicada.':'Configuração sem alterações.');
+  await iptvLoadStatus();await iptvLoadChannels(true);
+ }catch(e){iptvNote('Não foi possível guardar: '+e.message)}finally{iptvBusy(false)}
+};
+$('iptvRefresh').onclick=async()=>{
+ iptvBusy(true);iptvNote('A actualizar o catálogo activo…');
+ try{const p=await iptvRequest('/refresh',{method:'POST'});iptvNote('Catálogo actualizado: '+p.count+' canais.');await iptvLoadStatus();await iptvLoadChannels(true)}
+ catch(e){iptvNote('Actualização falhou; catálogo anterior preservado. '+e.message)}finally{iptvBusy(false)}
+};
+$('iptvHidden').onclick=()=>{iptvShowHidden=!iptvShowHidden;$('iptvHidden').textContent=iptvShowHidden?'Ver canais activos':'Canais removidos';iptvLoadChannels(true)};
+$('iptvSort').onchange=()=>iptvLoadChannels(true);
+$('iptvFind').onclick=()=>iptvLoadChannels(true);
+$('iptvSearch').onkeydown=e=>{if(e.key==='Enter')iptvLoadChannels(true)};
+$('iptvMore').onclick=()=>iptvLoadChannels(false);
+
+let subtitleTranslatorAvailable=[];
+async function subtitleTranslatorLoad(){
+ const msg=$('subtitleTranslatorMessage');msg.textContent='A consultar os modelos...';
+ try{
+  const response=await fetch('api/subtitle-translator/config',{cache:'no-store'});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const payload=await response.json();
+  subtitleTranslatorAvailable=payload.available||[];
+  const selected=payload.languages||[];
+  $('subtitleTranslatorBadge').textContent=subtitleTranslatorAvailable.length+' modelos disponíveis';
+  $('subtitleTranslatorLanguages').innerHTML=subtitleTranslatorAvailable.map(item=>{
+   const checked=selected.includes(item.code);const rank=selected.indexOf(item.code);
+   return `<div class="configItem" data-subtitle-lang="${escapeAttr(item.code)}" style="margin-bottom:10px"><div class="row"><label style="font-size:15px;color:var(--text)"><input type="checkbox" data-subtitle-enabled="${escapeAttr(item.code)}" ${checked?'checked':''}> ${escapeHtml(item.name)} (${escapeHtml(item.code.toUpperCase())})</label><span class="badge">Instalado</span></div><small>Rota: ${escapeHtml(item.route)} · modelo ${escapeHtml(item.model)}</small><label>Prioridade <select data-subtitle-priority="${escapeAttr(item.code)}" style="padding:9px;background:#14251a;color:var(--text);border:1px solid var(--line);border-radius:8px">${subtitleTranslatorAvailable.map((unused,n)=>`<option value="${n}" ${rank===n?'selected':''}>${n+1}ª</option>`).join('')}</select></label></div>`;
+  }).join('');
+  msg.textContent='Preferências carregadas. Ordem actual: '+(selected.join(' → ')||'nenhuma');
+ }catch(e){msg.textContent='Falha ao consultar configuração: '+e.message}
+}
+$('subtitleTranslatorReload').onclick=subtitleTranslatorLoad;
+$('subtitleTranslatorSave').onclick=async()=>{
+ const checked=subtitleTranslatorAvailable.filter(item=>document.querySelector(`[data-subtitle-enabled="${item.code}"]`)?.checked)
+  .map((item,index)=>({code:item.code,rank:Number(document.querySelector(`[data-subtitle-priority="${item.code}"]`)?.value||0),index}))
+  .sort((a,b)=>a.rank-b.rank||a.index-b.index).map(x=>x.code);
+ const msg=$('subtitleTranslatorMessage');msg.textContent='A guardar...';
+ try{
+  const response=await fetch('api/subtitle-translator/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({languages:checked})});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  msg.textContent='Preferências aplicadas sem reiniciar o Core: '+(checked.join(' → ')||'nenhuma');
+  await subtitleTranslatorLoad();
+ }catch(e){msg.textContent='Erro ao guardar: '+e.message}
+};
 </script></body></html>

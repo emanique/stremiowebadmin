@@ -5,17 +5,18 @@ server byte-for-byte — the player follows whatever URIs we publish.
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import math
 import subprocess
 import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 
-from stremiosrv.api.media_fetch import resolve_media_input
+from stremiosrv.api.media_fetch import _is_own_host, resolve_media_input
 from stremiosrv.api.subs import parse_stream_url
 from stremiosrv.transcode.converter import TranscodeRetryLimited, _direct_video_codecs
 from stremiosrv.transcode.fingerprint import decide
@@ -91,6 +92,67 @@ def _limit_4k_hevc_browser_transcode(decision: dict, source_video: dict, *, cap:
 
 def _playback_registry(request: Request):
     return getattr(request.app.state, "playback_registry", None)
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback
+
+
+def _iptv_compatibility_decision(
+    decision: dict, probe: dict, media_url: str,
+) -> tuple[dict, bool]:
+    """Normalise external IPTV HLS/live MPEG-TS into H.264/AAC for browser and app clients.
+
+    A source URL from the internal torrent endpoint is never intercepted. A
+    multi-channel M3U catalog is not a playable source; callers must supply a
+    selected channel URL. Network acquisition is still performed through the
+    original guarded media-reader tickets rather than by FFmpeg directly.
+    """
+    source = probe.get("format") or {}
+    name = str(source.get("name") or "").lower()
+    try:
+        duration = float(source.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    path = urlsplit(media_url).path.lower()
+    is_hls = "hls" in name or path.endswith(".m3u8")
+    is_live_ts = "mpegts" in name and duration <= 0
+    host = (urlsplit(media_url).hostname or "").lower()
+    # Internal torrent streams and loopback readers must not become IPTV jobs.
+    is_iptv = (
+        (is_hls or is_live_ts)
+        and parse_stream_url(media_url) is None
+        and not _is_loopback_host(host)
+    )
+    if not is_iptv:
+        return decision, False
+    if decision.get("video"):
+        decision["video"]["action"] = "transcode"
+        source_video = next(
+            (s for s in probe.get("streams", []) if s.get("track") == "video"), {}
+        )
+        decision["video"]["scale_width"] = min(
+            int(source_video.get("width") or 1920), 1920
+        )
+    if decision.get("audio"):
+        decision["audio"]["action"] = "transcode"
+    return decision, True
+
+
+def _refuse_internal_hls_playlist(request: Request, media_url: str, pr: dict) -> None:
+    """Retain the old torrent/internal-manifest 415 security contract."""
+    fmt = str((pr.get("format") or {}).get("name") or "").lower()
+    if "hls" not in fmt:
+        return
+    host = (urlsplit(media_url).hostname or "").lower()
+    if _is_own_host(request, host) or _is_loopback_host(host):
+        raise HTTPException(status_code=415, detail="internal playlist inputs are not accepted")
 
 
 def _torrent_input_is_incomplete(request: Request, media_url: str) -> bool:
@@ -256,8 +318,7 @@ def probe(mediaURL: str, request: Request) -> dict:
         pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
-    if "hls" in (pr.get("format", {}).get("name") or ""):
-        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
+    _refuse_internal_hls_playlist(request, mediaURL, pr)
     return pr
 
 
@@ -265,7 +326,7 @@ def probe(mediaURL: str, request: Request) -> dict:
 def master(
     job_id: str,
     request: Request,
-    mediaURL: str,
+    mediaURL: str | None = None,
     videoCodecs: list[str] = Query(default=[]),
     audioCodecs: list[str] = Query(default=[]),
     maxAudioChannels: int = 2,
@@ -275,13 +336,48 @@ def master(
     conv = _converter(request)
     if conv is None:
         raise HTTPException(status_code=503, detail="transcoder unavailable")
-    media = _resolve_media_for_hls(request, mediaURL)
+    # Private IPTV sources are resolved exclusively on the server. Stremio
+    # clients receive a signed channel job, never upstream credentials.
+    signed_iptv = job_id.startswith("iptv-")
+    if signed_iptv:
+        import os
+
+        from stremiosrv.iptv.store import enabled as iptv_enabled, resolve_job
+        from stremiosrv.library import netguard
+        if (os.environ.get("STREMIOSRV_IPTV_ENABLED", "").lower() not in ("1", "true", "yes")
+                or not iptv_enabled()):
+            raise HTTPException(status_code=404)
+        peer = request.client.host if request.client else ""
+        client_ip = netguard.client_ip(peer, request.headers.get("x-forwarded-for", ""))
+        if not netguard.is_allowed(client_ip) or mediaURL is not None:
+            raise HTTPException(status_code=404)
+        channel = resolve_job(job_id)
+        if channel is None:
+            raise HTTPException(status_code=404)
+        mediaURL = channel.url
+    if not mediaURL:
+        raise HTTPException(status_code=422, detail="mediaURL required")
+    if signed_iptv:
+        # The playlist is remotely managed and untrusted. Force internet-class
+        # destination validation on every redirect and segment, even when the
+        # viewer is in the LAN. Do not let the provider reach internal hosts.
+        from urllib.parse import urlsplit
+
+        from stremiosrv.api.media_fetch import reader_url, register
+        from stremiosrv.proxy import dest
+        target = urlsplit(mediaURL)
+        try:
+            dest.pick(target.hostname, target.port or (443 if target.scheme == "https" else 80), False)
+        except (OSError, dest.Refused) as exc:
+            raise HTTPException(status_code=502, detail="IPTV source unreachable") from exc
+        media = reader_url(request, register(mediaURL, False))
+    else:
+        media = _resolve_media_for_hls(request, mediaURL)
     try:
         pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
-    if "hls" in (pr.get("format", {}).get("name") or ""):
-        raise HTTPException(status_code=415, detail="playlist inputs are not accepted")
+    _refuse_internal_hls_playlist(request, mediaURL, pr)
     dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
     source_video = next(
         (s for s in (pr.get("streams") or []) if s.get("track") == "video"),
@@ -305,6 +401,12 @@ def master(
     # Respect the deployment's codec allow-list *before* the 4K Main10 cap.
     _apply_hls_direct_codec_policy(dec, source_video)
     _limit_4k_hevc_browser_transcode(dec, source_video)
+    # Browser and native app take the same compatibility path when they use
+    # Core HLS. External IPTV must not retain codec COPY, even if the client
+    # advertises that codec (ExoPlayer transitions can still fail).
+    dec, iptv_compat = _iptv_compatibility_decision(dec, pr, mediaURL)
+    if iptv_compat:
+        logger.info("IPTV HLS compatibility: forcing H.264/AAC via Core")
     logging.getLogger("stremiosrv.transcode").info(
         "HLS request: job=%s sourceCodec=%s width=%s bitDepth=%s "
         "startTimeMs=%s maxWidth=%s outputAction=%s scaleWidth=%s "
@@ -332,8 +434,13 @@ def master(
     source_format = pr.get("format") or {}
     dec["_liveInput"] = (
         not dec["_realtimeInput"]
-        and "mpegts" in str(source_format.get("name") or "").lower()
-        and float(source_format.get("duration") or 0) <= 0
+        and (
+            (iptv_compat and float(source_format.get("duration") or 0) <= 0)
+            or (
+                "mpegts" in str(source_format.get("name") or "").lower()
+                and float(source_format.get("duration") or 0) <= 0
+            )
+        )
     )
     try:
         d = conv.ensure_job(
@@ -357,10 +464,33 @@ def master(
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid job id") from e
     registry = _playback_registry(request)
+    if signed_iptv:
+        from stremiosrv.iptv import switches
+        client_ip = netguard.client_ip(
+            request.client.host if request.client else "",
+            request.headers.get("x-forwarded-for", ""),
+        )
+        previous = switches.switch(client_ip, job_id)
+        if previous:
+            conv.stop(previous)
+            if registry is not None:
+                registry.end_hls(previous)
     parsed_source = parse_stream_url(mediaURL)
+    if parsed_source is not None:
+        try:
+            from stremiosrv.library.labels import record_played_source
+            eng = request.app.state.engine
+            handle = eng.get(parsed_source[0]) if eng else None
+            torrent_file = getattr(handle, 'torrent_file', None)
+            ti = torrent_file() if callable(torrent_file) else None
+            if ti and ti.files().num_files() == 1:
+                record_played_source(request.app.state.settings.cache_root,
+                                     parsed_source[0], parsed_source[1])
+        except (OSError, ValueError, TypeError):
+            pass  # Never interrupt HLS when a preference cannot be saved.
     if registry is not None:
-        # HTTP/IPTV mediaURL has no torrent infohash, but it is still a real HLS
-        # playback. The previous guard silently omitted those sessions.
+        # Non-torrent HLS jobs must also be visible for workload and cleanup
+        # monitoring; only torrents carry a verified infohash/file index.
         registry.register_hls_job(
             job_id,
             parsed_source[0] if parsed_source is not None else "",
@@ -479,6 +609,14 @@ def serve_file(job_id: str, filename: str, request: Request):
     # before the wait below, so a client blocked on a segment that has not been written yet still
     # counts as present.
     conv.touch(job_id)
+    if job_id.startswith("iptv-"):
+        from stremiosrv.iptv import switches
+        from stremiosrv.library import netguard
+        client_ip = netguard.client_ip(
+            request.client.host if request.client else "",
+            request.headers.get("x-forwarded-for", ""),
+        )
+        switches.touch(client_ip, job_id)
     registry = _playback_registry(request)
     if registry is not None:
         registry.touch_hls(job_id, request.headers.get("User-Agent"))

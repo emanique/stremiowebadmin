@@ -155,6 +155,40 @@ def touch_last_source(cache_root: str, info_hash: str, label: dict) -> bool:
     return True
 
 
+
+def record_played_source(cache_root: str, info_hash: str, file_idx: int) -> bool:
+    """Persist a verified local playback as the preferred source for this title.
+
+    No browser state or client ID is involved: all devices using the same
+    server's My Library see the same ordering. Never writes labels for an
+    unlabelled torrent. Avoid repeated disk writes on successive HTTP ranges.
+    """
+    if not isinstance(file_idx, int) or file_idx < 0:
+        return False
+    with _lock:
+        data=load(cache_root)
+        row=data.get((info_hash or '').lower())
+        if not isinstance(row,dict) or not isinstance(row.get('metaId'),str):
+            return False
+        # Only prefer a file already recorded against the logical title;
+        # large episode packs must not silently prefer another episode.
+        recorded=file_record(row.get('file'))
+        if recorded is None:
+            return False
+        now=int(time.time())
+        if (row.get('preferredFileIdx')==file_idx and
+                now-int(row.get('lastSourceAt') or 0)<60):
+            return False
+        # The underlying single-file source is index 0; do not let a forged
+        # index decorate another stream. Multi-file sources require a stronger
+        # file-index-to-record mapping before cross-device preference updates.
+        if file_idx != 0:
+            return False
+        row['preferredFileIdx']=file_idx
+        row['lastSourceAt']=now
+        _save(cache_root,data)
+        return True
+
 def drop(cache_root: str, info_hash: str) -> None:
     with _lock:
         data = load(cache_root)

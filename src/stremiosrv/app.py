@@ -1,6 +1,7 @@
 import contextlib
 import contextvars
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,8 +24,11 @@ from stremiosrv.api import (
     subs,
 )
 from stremiosrv.config import Settings
+from stremiosrv.iptv import addon as iptv_addon
+from stremiosrv.iptv import control as iptv_control
 from stremiosrv.library import addon as library_addon
 from stremiosrv.library import api as library_api
+from stremiosrv.subtitle_translator import addon as subtitle_translator_addon
 
 # Exception leaf types that mean "the client went away mid-stream" (vs a real server bug). Matched by
 # name so the check is a pure function (no running event loop needed): asyncio/anyio cancellation is
@@ -176,7 +180,11 @@ def create_app(settings: Settings | None = None, engine=None, converter=None) ->
     app.include_router(playback.router)
     app.include_router(cache_api.router)
     app.include_router(hls.router)
+    if os.environ.get('STREMIOSRV_IPTV_ENABLED', '').lower() in ('1', 'true', 'yes'):
+        app.include_router(iptv_addon.router)
+        app.include_router(iptv_control.router)
     app.include_router(subs.router)
+    app.include_router(subtitle_translator_addon.router)
     app.include_router(embedded_ass.router)
     app.include_router(media_fetch.router)
     app.include_router(casting.router)
@@ -276,7 +284,6 @@ def build_app() -> FastAPI:
         daemon=True,
     ).start()
     # ...and the same for transcode output, which the evictor is forbidden to reclaim.
-    # Share the same playback registry used by the HLS routes with the GC loop.
     application = create_app(settings=settings, engine=engine, converter=converter)
     threading.Thread(
         target=run_transcode_gc,

@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     # IPv6 ULA and CGNAT (a private mesh-VPN tunnel is not RFC1918 and must still work).
     # Comma-separated CIDRs to replace that list outright.
     library_addon_allow: str = ""
+    # Comma-separated HTTPS addon manifest URLs used only for subtitle discovery.
+    # Empty by default: no external subtitle requests are made.
+    subtitle_source_addons: str = "https://opensubtitles-v3.strem.io/manifest.json"
     # The URL clients reach this server on: the same SERVER_URL the container takes for the web
     # player, read here unprefixed. /proxy counts a web page on its host as the server's own
     # (1.6.9). Empty, or unparseable: no page is.

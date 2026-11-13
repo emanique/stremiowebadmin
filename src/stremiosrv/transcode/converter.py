@@ -900,7 +900,7 @@ def run_transcode_gc(converter: Converter, interval: int = 60, max_age: int = 60
                     try:
                         on_reaped(job_id)
                     except Exception:
-                        logger.exception("transcode playback registry cleanup failed for %s", job_id)
+                        logger.exception('transcode playback registry cleanup failed for %s', job_id)
         except Exception:
             logger.exception("transcode reap failed")
         try:

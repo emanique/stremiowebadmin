@@ -80,14 +80,14 @@
       return;
     }
 
-    const state = addon.ready ? 'Ready' : addon.enabled ? 'HTTPS required' : 'Unavailable';
+    const state = addon.ready ? 'Ready' : addon.enabled ? 'Configuration required' : 'Unavailable';
     const resources = Array.isArray(addon.resources) && addon.resources.length
       ? addon.resources.join(' · ')
       : 'No resources reported';
 
     if (!addon.manifestUrl) {
       details.className = 'addonUnavailable';
-      details.innerHTML = `<strong>${escapeHtml(addon.name)}</strong><br>${escapeHtml(addon.status || state)}`;
+      details.innerHTML = `<strong>${escapeHtml(addon.name)}</strong><br>${escapeHtml(addon.status || state)}${addon.managementUrl ? `<div class="addonActions" style="margin-top:12px"><a class="mini" href="${escapeAttr(addon.managementUrl)}">${addon.id === 'iptv-local' ? 'Gerir IPTV' : 'Abrir gestão'}</a></div>` : ''}`;
       return;
     }
 
@@ -112,7 +112,7 @@
         ${escapeHtml((addon.update && addon.update.message) || 'Update status unavailable.')}
       </div>
       <div class="addonActions">
-        ${addon.managementUrl ? `<a class="mini" href="${escapeAttr(addon.managementUrl)}" target="_blank" rel="noopener">Manage / Delete titles</a>` : ''}
+        ${addon.managementUrl ? `<a class="mini" href="${escapeAttr(addon.managementUrl)}" ${addon.id === 'iptv-local' ? '' : 'target="_blank" rel="noopener"'}>${addon.id === 'iptv-local' ? 'Gerir IPTV / Canais' : addon.id === 'subtitle-translator' ? 'Translate subtitles' : 'Manage / Delete titles'}</a>` : ''}
         ${updateButton(addon)}
         <button class="mini" type="button" data-addon-check="${escapeAttr(addon.id)}">Refresh status</button>
       </div>

@@ -250,8 +250,10 @@ def _session_from_command(container, cache_root: str, command: str) -> dict[str,
     decision = base._parse_policy_log(log_text)
     progress = base._parse_progress(log_text)
     log_video, log_audio = _source_codecs_from_log(log_text)
-    source_video = decision.get("sourceVideo") if decision else log_video
-    source_audio = decision.get("sourceAudio") if decision else log_audio
+    # Policy records may exist without source codecs (typical IPTV HTTP
+    # streams). Fall back to FFmpeg's input stream metadata in that case.
+    source_video = (decision.get("sourceVideo") if decision else None) or log_video
+    source_audio = (decision.get("sourceAudio") if decision else None) or log_audio
     source_info_hash, source_file_idx = _source_stream_from_argv(argv)
     return {
         "jobId": job_id,

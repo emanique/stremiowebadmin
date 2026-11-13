@@ -1,222 +1,330 @@
-<div align="center">
+# StremioServerWebAdmin
 
-# Stremio WebAdmin — Standalone
+Standalone Docker Compose Stremio Core 1.6.34 + WebAdmin 3.0.14 + WebPlayer, IPTV Addon and offline Subtitle Translator.
+The product release version is tracked separately in `RELEASE_VERSION`.
 
-## Versão estável v0.1.3
+## Installation (Debian / Ubuntu)
 
-**Release estável:** [v0.1.3](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3). Consolidada a partir da RC9 depois de validações LAN, HTTPS/WebAdmin sem Basic Auth, VAAPI, reprodução/transcoding/retoma, observação NAT-PMP do VPN Gateway v1.0.8, reversão da porta para 6881 e recuperação após reboot dos dois servidores. O Stremio Core mantém a sua versão independente (1.6.34).
-
-**Instalação limpa:** o WebAdmin não exige login na LAN privada identificada (CIDR /24 ou mais restrito); não exponha directamente esta interface à WAN. A atribuição da porta VPN é uma funcionalidade opcional e automática apenas quando há política de host autorizada no Gateway e rede de gestão protegida. A admissão inicial TLS utiliza TOFU e não substitui uma PKI em LAN não fiável. A versão do ProxyWAN é independente.
-
-
-#
-### Acesso WebAdmin sem password numa LAN de QA
-
-A instalação pública configura **acesso HTTPS sem password por defeito**, limitado automaticamente à sub-rede IPv4 privada efectivamente configurada na interface de gestão (prefixo /24 ou mais restrito). O WebAdmin possui privilégios de gestão do Docker: não exponha a porta TCP/443 a redes não confiáveis. Para uma instalação anterior, pode optar explicitamente por uma política LAN através de:
-
-```bash
-sudo sh -c 'printf "lan:192.168.1.0/24\\n" > /etc/stremio-webadmin/access-policy'
-sudo chmod 600 /etc/stremio-webadmin/access-policy
-sudo python3 /opt/stremio-server-webadmin/scripts/configure-host-https.py --apply
-```
-
-Substitua `192.168.1.0/24` pela rede LAN real (mínimo /24 e sempre privada). O IP do próprio Stremio tem de pertencer a essa rede. A política persiste quando o configurador voltar a ser executado. Para restaurar autenticação, escreva `basic` no mesmo ficheiro e volte a executar `--apply`. Não utilize esta opção se a interface for acessível por utilizadores não confiáveis ou publicada na WAN. O comportamento automático sem autenticação só se aplica ao código corrigido posteriormente à tag RC8. A RC8 anteriormente publicada ainda gera credenciais; a RC9 já aplica automaticamente esta política.
-
-
-## Self-hosted Stremio Core, WebAdmin and WebPlayer with hardware-aware streaming
-
-![Linux](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-2563eb?logo=linux&logoColor=white)
-![Docker](https://img.shields.io/badge/runtime-Docker%20Compose-2496ED?logo=docker&logoColor=white)
-![GPU](https://img.shields.io/badge/transcoding-VAAPI%20%7C%20CPU-7C3AED)
-![Core](https://img.shields.io/badge/Stremio_Core-1.6.34-5B21B6)
-![Status](https://img.shields.io/badge/status-public%20pre--release-F59E0B)
-
-**Run a Stremio/libtorrent streaming backend with a separate browser-based administration interface, WebPlayer, adaptive playback, and host-level network management.**
-
-[Features](#-features) · [Gallery](#-webadmin-gallery) · [Architecture](#-architecture) · [Installation](#-installation) · [Security](#-security) · [Release readiness](#-release-readiness)
-
-</div>
-
----
-
-> **Release status:** the public repository is the installable distribution of the private development project. The current standalone RC8 candidate is available; the documented clone installation depends on Docker and host prerequisites. Release automation verifies and publishes packages using GitHub Actions. Production-ready packages must only be attached after local validation, version parity and checksum verification.
-
-**Release RC9:** [v0.1.3-rc.9](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3-rc.9). A instalação nova não exige login no WebAdmin quando a interface de gestão está numa LAN privada /24 ou mais restrita. A sincronização do BitTorrent consulta automaticamente a autorização do host no VPN Gateway `v1.0.8` quando este é o gateway predefinido: se IP/MAC, política, TCP/UDP e atribuição NAT-PMP estiverem válidos, actualiza `.env` e recria apenas o Core, verificando health e dispositivo VAAPI. Sem autorização válida, regressa à porta `6881` após uma tolerância de até 120 segundos para renovações de lease. O Gateway gere exclusivamente a política e o lease; o host Stremio é o único a escrever a porta.
-
-**Confiança e limites:** a descoberta automática de primeiro contacto usa a identidade do próximo salto predefinido e *TOFU* (certificado TLS fixado localmente após verificar o IP no SAN); requer uma LAN privada fiável com protecção contra spoofing L2. Em redes não confiáveis, use a integração anterior com certificado de CA aprovado e token dedicado, não este modo automático. O Stremio não encaminha por VPN se o Gateway deixar de ter uma política que o autorize; a porta 6881 local não é prova de disponibilidade pública.
-
-**Release RC8:** [v0.1.3-rc.8 e packages](https://github.com/emanique/stremiowebadmin/releases/tag/v0.1.3-rc.8). Contém registo HLS para entradas IPTV/HTTP sem infohash, associação dos processos FFmpeg às sessões e limpeza do registo após GC. Mantém a correcção do monitor de processos não registados da RC7. A promoção é candidata e não certificação de produção; testes prolongados de dispositivos IPTV, renovações de porta e avaliação completa de instalação limpa continuam distintos dos testes dirigidos executados.
-
-## ✨ Features
-
-| | Component | Capability |
-|---|---|---|
-| 🖥️ | **Independent WebAdmin** | Browser-based administration, runtime health, configuration, logs and diagnostics, separate from the streaming server. |
-| 🎬 | **Stremio Core** | Self-hosted libtorrent server exposing the Stremio API, media streams and HTTPS endpoints. |
-| ▶️ | **WebPlayer** | Direct stream where supported; HLS conversion where required for browser compatibility. |
-| ⚡ | **Hardware acceleration** | Intel/DRM VAAPI detection with safe software fallback and preserved device selection across server recreation. |
-| 🎞️ | **HLS and IPTV** | On-demand HLS, live MPEG-TS remultiplexing for supported H.264/AAC sources, bounded sliding playlists and FFmpeg cleanup. |
-| 📝 | **Playback continuity** | Resume position, duration and Continue Watching integration with the Stremio runtime. |
-| 🔌 | **BitTorrent ports** | Consistent host `STREMIOSRV_BT_LISTEN_PORT` configuration and TCP/UDP publishing. |
-| 🔐 | **Optional external VPN Gateway** | Read-only, authenticated provider port observation; the standalone Stremio reconciler owns any `.env` update and server recreation. |
-| 🧩 | **Host reconciliation** | Controlled network, DNS, GPU, service and port configuration through a systemd reconciliation timer. |
-| 📦 | **Debian packaging** | Installable `.deb` plus source archive and SHA-256 verification, subject to public release QA. |
-
-## 🖥️ WebAdmin gallery
-
-The initial screenshot set has been captured and locally sanitised. Files are pending binary promotion to both repositories; the gallery intentionally uses a descriptive table until the images exist in Git. The gallery below identifies each capture; image elements will be activated only after the files are present in both repositories, to avoid broken README images.
-
-| Screenshot | Functional evidence |
-|---|---|
-| `docs/screenshots/dashboard.png` | Service status, HTTPS certificate, runtime versions, streams/cache and automatic transcoding status |
-| `docs/screenshots/configuration.png` | Server parameters: network, BitTorrent, caching, bandwidth and seeding |
-| `docs/screenshots/configuration-2.png` | Playback, adaptive download, next-episode prefetch and automatic transcoding |
-| `docs/screenshots/configuration-3.png` | Library access, TLS and diagnostics |
-| `docs/screenshots/logs.png` | Separate Stremio and WebAdmin logs and troubleshooting |
-| `docs/screenshots/port-forwarding.png` | Host-owned TCP/UDP BitTorrent port; Gateway verification status is explicitly distinguished |
-| `docs/screenshots/library.png` | My Library addon, saved/downloaded media and cache management |
-| `docs/screenshots/vaapi.png` | VAAPI device readiness, codec capability and live FFmpeg metrics |
-| `docs/screenshots/playback.png` | Streams, cache utilisation, download progress and Pin/Delete controls |
-| `docs/screenshots/webplayer.png` | IPTV channel discovery and the web-based streaming interface |
-
-The screenshots demonstrate the interface and observed functionality, **not** successful external NAT-PMP assignment, Internet peer reachability or successful playback on every television platform. The media view and TLS/port indicators are runtime snapshots rather than blanket compatibility guarantees.
-
-<!-- Once reviewed images are uploaded to BOTH repos in docs/screenshots/,
-replace this table with a responsive two-column image gallery.
-Do not disclose DNS/IP identifiers, QR connection data, addon tokens or
-private media history in the public screenshots. -->
-
-## 🚀 What makes the standalone edition different?
-
-This project is intentionally **not** the complete Gluetun + Pi-hole distribution of [Stremio Server WebAdmin](https://github.com/emmanique/stremio-webadmin).
-
-Its focus is a smaller, independently administered Stremio runtime. The external VPN Gateway remains responsible for VPN routing, kill switch, DNS policy, NAT-PMP lease and provider port discovery. Stremio remains responsible for its own media processes, BitTorrent configuration and Docker container lifecycle.
-
-### Streaming and transcoding
-
-The runtime determines when media can be streamed directly and when remultiplexing or transcoding is needed. Hardware acceleration is selected only when a supported device is available. HLS workload reuse and process cleanup limit duplicate FFmpeg sessions.
-
-For supported live MPEG-TS IPTV inputs, the HLS pipeline can copy H.264/AAC, convert AAC ADTS headers where required and keep a bounded playlist. Browser and device compatibility still depends on the source codecs and client capabilities.
-
-### Gateway port synchronisation
-
-The intended integration is:
-
-```text
-VPN Gateway → authenticated port observation (TCP/UDP)
-            → bootstrap-installed host observer
-            → root-owned observation file
-            → Stremio reconciler
-            → .env (STREMIOSRV_BT_LISTEN_PORT)
-            → controlled Stremio container recreation only on change
-```
-
-A valid provider mapping is **not** proof of inbound Internet peer reachability. A missing, stale or invalid observation must not cause a guessed port update. Gateway credentials never belong in the repository or public bootstrap.
-
-## 🏗️ Architecture
-
-```text
-                   Browser / Stremio App
-                          |
-              +-----------+-----------+
-              |                       |
-        HTTPS WebAdmin          WebPlayer / API
-          (nginx 443)          (8080 / 11470)
-              |                       |
-    Host reconciliation      Stremio/libtorrent
-    + status diagnostics     HTTPS / HLS / media
-              |                       |
-              +------- Docker -------+
-                          |
-                Host DNS / networking
-                          |
-             Optional external VPN Gateway
-              (separately installed)
-```
-
-The WebAdmin and Stremio server have distinct lifecycles; management should remain accessible while the streaming container is restarted. The architecture does not require a bundled VPN gateway or Pi-hole container.
-
-## 📦 Installation
-
-### Install from the public Git repository
-
-Once a source snapshot has been promoted and validated, users can clone the public repository and run its standalone setup on a Debian/Ubuntu host with systemd. Missing Docker, Compose, Nginx, Python, OpenSSL and network utilities are installed by APT:
-
-```bash
-sudo git clone --branch v0.1.3 --depth 1 https://github.com/emanique/stremiowebadmin.git /opt/stremio-server-webadmin
-sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
-```
-
-For independent QA, the pinned pre-release tag above is intentional; cloning the mutable main branch would not reproduce the same release. The source install still builds the Core and WebAdmin images locally; no pre-existing images should be assumed.\n\nOn a fresh Debian/Ubuntu host, the setup first installs missing Docker Engine,
-Docker Compose v2, Docker Buildx, Nginx, Python, OpenSSL and iproute2 packages via APT.
-It checks for existing packages before installing anything and aborts on
-unsupported distributions. To require manual provisioning instead, set
-`STREMIO_SKIP_DEP_INSTALL=1` in the setup environment.
-
-**The full standalone source has now been promoted to the public `main` branch and is available for cloning.** The setup builds Docker images locally and configures host services. The corrected installer defaults to passwordless HTTPS restricted to the detected trusted private LAN; explicit `basic` access-policy remains supported if authentication is required. A separate Debian 13 KVM clean installation and reboot test passed. IPTV/device playback, external Gateway lease-change and security acceptance are still required before a stable release.
-
-### Update an existing tag-based source installation
-
-A source clone using `--branch v0.1.3-rc.8` is in detached-HEAD state. Do not use `git pull` directly. Preserve your existing `.env`, persistent volumes and any local changes before switching to the new public tag:
-
-```bash
-cd /opt/stremio-server-webadmin
-sudo git fetch origin --tags
-sudo git checkout v0.1.3
-sudo sh packaging/stremio-webadmin-setup.sh
-```
-
-If the checkout reports modified files, **back them up first** (for example `git stash push -u`), then change tag; do not discard local settings or run `docker compose down -v`. The installer does not replace an existing `.env`. For a fresh clone, use the stable v0.1.3 clone command above.
-
-The automatic trusted-LAN Gateway observer uses the active IPv4 default next hop. A matching, authorised policy is required in VPN Gateway Multi v1.0.8; if missing or revoked the Stremio BT listen port safely converges to 6881 after a 120-second lease-renewal grace, without changing Gateway routing policies. The first TLS certificate is pinned (TOFU); if the Gateway certificate later changes, the host refuses new observations until trust is explicitly re-established.
-
-### Install from a release package
-
-The Debian/Ubuntu installation command after the first verified release is:
-
-```bash
-sudo apt install ./stremio-webadmin_0.1.3_all.deb
+```sh
+sudo apt install ./stremio-webadmin_0.1.4_all.deb
 sudo stremio-webadmin-setup
 ```
 
-The Debian package carries audited source and builds the required Docker images locally. **It does not yet provide immutable, published GHCR images.** The setup must preserve the existing host `.env` and persistent volumes; do not use `docker compose down -v` during a normal upgrade.
+The package ships audited source; the installer builds Docker images locally.
+It is **not** an immutable GHCR deployment. It preserves an existing host
+`.env` and persistent Docker volumes and refuses a conflicting active
+IP/BitTorrent port instead of silently resetting them. Never use
+`docker compose down -v` during a routine upgrade.
 
-### Default endpoints
+For a public-source checkout (no private repository access required):
 
-| Service | Address |
-|---|---|
-| HTTPS WebAdmin | `https://HOST_IP/` |
-| WebPlayer | `http://HOST_IP:8080/` |
-| Stremio API | `http://HOST_IP:11470/` |
-| Stremio HTTPS | `https://HOST_IP:12470/` |
-| BitTorrent | The effective TCP/UDP port in `.env`, verified against Docker and `/netcheck.json` |
+```sh
+git clone https://github.com/emanique/stremiowebadmin.git
+cd stremiowebadmin
+cp .env.example .env
+sudo python3 scripts/configure-host-https.py --apply
+sh start.sh
+# For host-level reconciliation and required OS packages (after choosing the
+# installation directory):
+sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
+```
 
-These are defaults, not a guarantee that a firewall or reverse proxy permits external access.
+For private local development:
+```sh
+git clone -b develop git@github.com:emanique/StremioServerWebAdmin.git
+cd StremioServerWebAdmin
+cp .env.example .env
+sudo python3 scripts/configure-host-https.py --apply
+sh start.sh
+```
 
-## 🔒 Security
+## Network and administration
 
-**The standalone WebAdmin has privileged Docker management capabilities. Corrected new installs use HTTPS without a login only for the detected trusted LAN, enforced by Nginx `allow`/`deny`; the direct WebAdmin remains on loopback.** Restrict TCP 443 to a trusted administrator LAN and apply host firewall rules. Treat the Docker socket, environment files, provider credentials and API tokens as privileged secrets.
+- WebAdmin: `https://SERVER_HOST/` (Nginx 443, local WebAdmin 8090).
+- WebPlayer: `http://SERVER_HOST:8080/`.
+- Core: `http://SERVER_HOST:11470/` and `https://SERVER_HOST:12470/`.
+- Effective BitTorrent port: check Core `/netcheck.json`; this is host-owned
+  and not necessarily the default 6881.
+- Host IPv4, DNS, GPU and port settings are reconciled by the systemd
+  `stremio-webadmin-reconcile.timer`, without changing the VPN Gateway.
+- WebAdmin controls Docker and must be protected. By default, host Nginx allows passwordless management only from a detected trusted private LAN. An optional Basic Auth policy supports password-protected administration; see scripts/configure-host-https.py and scripts/change-webadmin-password.py. Do not expose WebAdmin management directly to the public Internet.
 
-For a remote VPN Gateway, use TLS trust validation, a dedicated read-only token, the expected host MAC/IP and policy identity, a current lease, and verified matching TCP/UDP port values. Never embed private keys or tokens in examples, screenshots or release packages.
+The optional host-only Gateway port synchronizer needs a dedicated read-only
+token, authenticated policy, matching host MAC/IP and trusted TLS CA. Without
+these, the interface reports the local effective port but **does not claim
+that NAT-PMP is assigned or that WAN connectivity works**.
 
-## 🧪 Release readiness
+## Playback
 
-**Historical pre-release candidate (RC8):** standalone `0.1.3-rc.8` (WebAdmin `3.0.14`, Core `1.6.34`). **Historical RC6 QA evidence (not a new RC8 full-suite claim):** The frozen Python 3.12 regression passed on Debian 13 QA: 1,629 passed, 2 skipped, 0 failed** using Python 3.12, Docker Compose, Node.js and a real-disk TMPDIR. Base and VAAPI Compose configuration, Python compilation and Debian/source package SHA-256 verification also passed. A separate Debian 13 KVM clean-install QA passed, including both containers healthy, HTTP endpoints, HTTPS Basic authentication and recovery after an OS reboot. The reconciler now consumes the separate root-owned Gateway observer record and simulated port change/rollback checks passed. Live authenticated Gateway port renewal, IPTV/device playback and external NAT reachability are not yet accepted; no production readiness is implied.
+The Core owns direct/transcode decisions. The App uses HTTP Range for supported
+direct streams; the WebPlayer uses HLS when necessary. Continue Watching,
+source duration and HLS seek are covered by regression tests.
 
-A public release will require a clean installation on a separate QA host, reproducible source/package creation, unit and functional tests, Docker health checks, playback regression, validation of the authentication and network boundary, and SHA-256 checks of every downloadable package.
+External IPTV M3U entries may point to continuous MPEG-TS, not HLS manifests.
+For detected live H.264/AAC sources, HLS/fMP4 remultiplexing copies codecs,
+converts AAC ADTS headers to ASC, and maintains a bounded eight-segment
+sliding playlist. The AAC filter does not affect VOD copying. Repeated HLS
+requests reuse a workload; failed FFmpeg restarts have a bounded retry budget.
+The HLS playback registry also tracks external, non-torrent sessions without
+inventing torrent identifiers, and garbage-collection reaping closes stale
+HLS sessions. Subtitle FFmpeg failures are classified without logging source
+URLs or private playlist credentials.
 
-The private development repository is [emanique/StremioServerWebAdmin](https://github.com/emanique/StremioServerWebAdmin) and is the sole source of truth. The public repository is a read-only distribution model for consumers (clone, setup and tagged packages), with a release-only GitHub Actions workflow. Development, tests, release candidates and quality gates run privately or locally. Promotion copies only approved source, documentation and install assets from an exact Git commit; the README and release version must match, and .env, credentials, keys, caches, test outputs and internal tooling must be excluded. See [Release and promotion process](docs/RELEASE_PROCESS.md).
+## Guided upgrade of an existing server
 
-The initial source audit also identifies open acceptance items: extended IPTV playback in a real client, second-host clean installation, real authenticated Gateway port changes, and immutable GHCR image distribution. These are **not** claimed as completed.
+The migration is **not** a replacement of persistent cache/configuration and
+does not import provider credentials into source control. On the original
+server, preserve the existing Compose volumes, `.env`, TLS, GPU settings and
+BT port before applying new images. See [controlled existing-server upgrade
+procedure](docs/UPGRADE_GUIDE.md).
 
-## 📸 Screenshot contribution
+Versioned tooling:
 
-The gallery filenames above are stable in **both** repositories. Add screenshots to `docs/screenshots/` in the private DEV repository first, with sensitive information removed; the approved set is promoted unchanged to the public repo together with the corresponding README. Do not use screenshot links before the image files exist.
+- `python3 scripts/preflight-upgrade.py` inventories the live host without
+  exporting secrets.
+- `python3 scripts/snapshot-before-upgrade.py` backs up stopped containers'
+  persistent volumes and configuration into a local restricted folder.
+- `bash scripts/provision-subtitle-models.sh --install` installs only
+  SHA-256-verified English, French-pivot and Spanish CPU models.
 
-## 📄 Provenance and licensing
+Core and WebAdmin are available on the normal host ports, including
+`https://SERVER_HOST/`; Stremio addon manifests use trusted streaming HTTPS
+on 12470, configured separately with
+`STREMIOSRV_IPTV_PUBLIC_ORIGIN` and
+`STREMIOSRV_SUBTITLE_PUBLIC_ORIGIN`. No live-server upgrade is implied by the
+source commit: perform a guarded cutover only after a restorable snapshot.
 
-This is a standalone derivative distribution. It tracks Stremio Core and a WebAdmin platform as separately versioned components. The original reference project is [emmanique/stremio-webadmin](https://github.com/emmanique/stremio-webadmin); code provenance and the applicable licence must remain intact in the first source release.
+## Release QA
 
----
+```sh
+uv sync --frozen --group dev
+.venv/bin/pytest -q --disable-warnings
+bash scripts/build-qa-release.sh dist
+(cd dist && sha256sum -c SHA256SUMS)
+```
 
-<sub>Maintained for self-hosted deployment. Screenshots and detailed installation evidence will be added once the first public release candidate has completed QA.</sub>
+Review `docs/SOURCE_AUDIT_2026-11-06.md` for feature coverage and open
+operational acceptance items. In particular: browser IPTV endurance,
+second-host clean install, external authenticated Gateway lease changes, and
+immutable GHCR images have **not** been established by source tests.
+
+Source provenance: `SOURCE_PROVENANCE.txt`. Licence: `LICENSE`.
+
+## IPTV Addon (local M3U/M3U8)
+
+- The WebAdmin **IPTV** tab accepts an M3U/M3U8 URL or playlist file, tests
+  reachability, reports channel counts, supports refresh without restarting
+  Core, searchable channel listings, channel ordering, per-channel removal,
+  and addon enable/disable. The server reports refresh status and errors.
+- The addon supplies a Stremio manifest and exposes channels to the native
+  App and WebPlayer. Imported playlists and provider credentials belong to
+  the persistent `/config` volume, **never** the Git repository.
+- IPTV output format is chosen by the Core: a TS/live channel is not assumed
+  to be a browser-compatible HLS stream. H.264/AAC packaging and bounded
+  transcoding/re-muxing support are implemented, but compatibility still
+  depends on the source and the playback device (ExoPlayer, MPV, Samsung TV).
+- One client selecting another channel must not leave unlimited orphaned
+  FFmpeg sessions. Check the WebAdmin active-playback view and server logs.
+
+## Subtitle Translator Addon (offline, pt-PT)
+
+- A separate **Subtitle Translator** tab at `https://SERVER_HOST/#subtitleTranslator`
+  displays installed translation models, lets operators enable source
+  languages and set lookup priority, and persists preferences without a Core
+  restart. The default target is **Português (Portugal)**.
+- Translation happens **on demand**, after the user selects a subtitle variant;
+  it is not speech translation, live AI captioning, or automatic interception
+  of every subtitle chosen from a different Stremio addon.
+- Sources include subtitles discovered through configured addons, embedded
+  tracks in **complete** media, safe local subtitle files, and SRT/VTT content
+  already fetched through the Core's subtitle proxy during playback. The last
+  mechanism requires an unambiguous active film and a confidently detected
+  source language; if the App fetches directly from an outside provider it
+  may bypass capture. Partial downloads do not grant unsafe extraction of
+  embedded subtitle tracks.
+- Multiple selected releases are preserved independently. Their source
+  provider, language, and short source identifier distinguish them; choosing
+  a different release never replaces an existing translated SRT. Repeated
+  identical selections are deduplicated. The menu exposes cached translations
+  when the film has been resolved to the same verified torrent `infohash`.
+- Translated `.srt` files live under the movie's persistent download-cache
+  directory and are reused without new inference; they are not in the
+  transcoding cache. Cached SRT content is removed with the movie's cache.
+- Each eligible SRT starts with the bilingual attribution, ending **one
+  second before** the first original cue; it also identifies the detected
+  source language (for example `Inglês (EN) → Português (pt-PT)`). Existing
+  translated cues retain their timings and the notice is idempotent. If the
+  first original cue starts at or before one second, the notice is omitted
+  rather than overlapping dialogue.
+- The translated subtitle is delivered as an ordinary SRT over the configured
+  trusted HTTPS streaming origin. First use may take substantially longer
+  than a cache hit. A client-side timeout is **not** proof that translation
+  failed; reselect the cached variant after processing completes.
+
+### Offline language model provisioning
+
+#### Requirements, paths and security
+
+1. Install the Core/WebAdmin from a release or checked-out source, and ensure
+   the Compose project can build its Core image. The Core image includes
+   `ctranslate2==4.9.0`, `sentencepiece==0.2.3` and `langdetect==1.0.9`;
+   **Argos model files are separate** and are never installed on demand by
+   playback. The host requires `bash`, `python3`, `curl`, and access to the
+   upstream model endpoints for online provisioning.
+2. Reserve sufficient persistent storage: approximately **3 GiB or more**
+   for the tested extended collection, with additional free space for
+   temporary archives. The base set is considerably smaller. Available
+   languages and model sizes depend on upstream packages.
+3. Set the host directory through `STREMIOSRV_SUBTITLE_MODELS_DIR` in `.env`
+   (Compose variable); prefer an **absolute path on the persistent host
+   volume**, for example `/srv/stremio/subtitle-models` (a generic example,
+   not an address or a requirement). The Core sees that directory read-only
+   at `/opt/stremio-subtitle-models`, configured by
+   `STREMIOSRV_SUBTITLE_MODELS_ROOT`. Do not use the Docker image filesystem
+   or transcoding cache as the persistent model store.
+4. Confirm that the host path is writable by the operator performing the
+   installation and readable by the Docker Core. Never place provider API
+   keys, playlist URLs, user subtitles or account tokens alongside the
+   publicly distributed model-installer scripts.
+
+#### Minimal offline translation (English, Spanish and French)
+
+From the repository root, after setting the models directory in `.env`:
+
+```sh
+# Use the SAME directory configured in the deployment .env.
+export STREMIOSRV_SUBTITLE_MODELS_DIR="/srv/stremio/subtitle-models"
+mkdir -p "$STREMIOSRV_SUBTITLE_MODELS_DIR"
+bash scripts/provision-subtitle-models.sh --download-and-install
+bash scripts/provision-subtitle-models.sh --verify
+```
+
+The base installer uses **pinned SHA-256 digests** and provisions verified
+CTranslate2 packages for `en → pt`, `es → pt`, `fr → en` (French subsequently
+pivots via `en → pt`). The installer checks the expected files:
+`<root>/<source>_<target>/model/model.bin`, `model/config.json` and
+`sentencepiece.model`. It does not embed binary models in Git or publish
+user subtitles.
+
+#### Optional extended installation (additional languages)
+
+Once the minimal installation has passed verification, continue with the
+**same absolute path** configured in `.env` and used by the baseline model
+installer. The directory in the command below is illustrative and can be
+replaced by any existing persistent host path.
+
+```sh
+export STREMIOSRV_SUBTITLE_MODELS_DIR="/srv/stremio/subtitle-models"
+python3 scripts/provision-all-subtitle-models.py
+python3 scripts/provision-all-subtitle-models.py --install \
+  --root "$STREMIOSRV_SUBTITLE_MODELS_DIR" --workers 3
+```
+
+The first invocation **lists** upstream source→English candidates without
+installing anything. The second downloads compatible Argos CTranslate2
+packages into a temporary directory and installs each model pair into the
+persistent directory. Existing model pairs are preserved. Only successfully
+installed compatible models appear in the application: catalogue entries,
+failed downloads and unsupported legacy packages are not counted as working
+languages. A multi-step path (e.g. German→English→Portuguese) requires **both**
+individual model pairs; the presence of German→English alone is insufficient.
+An earlier validation installation included **28 compatible pairs covering
+27 source languages** (the baseline three included):
+`en, fr, es, bg, bn, de, el, et, eu, gl, ky, lv, ms, nb, nl, pb, pl, ru,
+sk, sl, sq, sw, th, tl, vi, zh, zt`. These are an observed reference set,
+**not** a guarantee that the current catalogue can reproduce every language.
+The WebAdmin dynamically advertises only verified installed pairs with a
+complete source → pt-PT translation path. This optional collection and its
+approximate 2.5 GiB of binaries are not shipped in the Git repository or
+standard release package.
+
+The optional script fetches the current provider catalogue: it cannot promise
+that every candidate remains available or compatible, and it records a SHA-256
+for the downloaded package for local audit. For reproducible regulated/offline
+installations, download and pre-approve model archives, verify trusted package
+checksums, and stage them separately rather than relying on a mutable remote
+catalogue. The optional installer records a download checksum after retrieval,
+but **does not validate an externally pinned checksum before installation**;
+only the baseline installer provides that stronger verification.
+
+#### Validate and troubleshoot
+
+After provisioning, check the model directories, Compose mount and API/UI:
+
+```sh
+find "$STREMIOSRV_SUBTITLE_MODELS_DIR" -mindepth 1 -maxdepth 1 -type d | sort
+# From the Compose project directory:
+sh start.sh config --quiet
+# Start the service if not already active; models need no Core restart when
+# the mount is already in place and accessible:
+sh start.sh up -d --no-build
+```
+
+Open **WebAdmin → Subtitle Translator**. The displayed source languages are
+**discovered from valid installed model paths**, not from the installer log.
+Enable the desired languages and set priority; save without restarting Core.
+Test a short English subtitle first, check the pt-PT SRT, then a pivot path
+(e.g. French). Confirm the original SRT timings, initial bilingual notice,
+source-language attribution, caching and playback in the native App and
+WebPlayer separately.
+
+If a language is absent, verify its required pair(s), the mounted model
+path, file permissions, and readable non-empty `model.bin`, `config.json` and
+`sentencepiece.model`. If the catalogue offers a legacy non-CTranslate2
+package, it is **not** usable with this engine. Model inference is CPU-first;
+GPU availability for video transcoding does not mean translation inference
+uses the same GPU. A first translation can take considerably longer than
+retrieving a cached SRT. Do not erase the download-cache volume to resolve a
+model problem.
+
+
+### Native App versus WebPlayer
+
+Stremio native clients decide how language names and addon-specific subtitle
+names are displayed. The addon supplies the full source/provider label, but
+some clients display only `Português — Subtitle Translator`; the original
+language is also written into the translated SRT's opening attribution.
+The WebPlayer and native App should be tested **independently** for subtitle
+menu visibility, asynchronous first translation, SRT loading, seeking and
+transcoding. Do not infer WebPlayer acceptance from App acceptance.
+
+## Preferred source, Continue Watching and multi-device behaviour
+
+- The server maintains the verified mapping `Stremio title ID → torrent
+  infohash → file index`, independently of the browser. On playback it
+  records the last used source and advertises a **My Library** stream marked
+  `Em cache no servidor · Última fonte utilizada`. The cached file must still
+  exist and pass the complete-file check.
+- The bundled WebPlayer has a `Continue watching` preferred-resume flow:
+  when the same authenticated Stremio account opens a movie with a unique,
+  verified cached single-file source, it can navigate directly to the Stremio
+  player. If the preference is unavailable, incomplete or ambiguous, it
+  falls back to Stremio's normal source selection. The user can still choose
+  another source through the ordinary details/streams screen.
+- Preference is **server-side**, so the same My Library addon installed on
+  the same Stremio account and pointing to the same server can return the
+  chosen source across devices. Native Stremio clients control their own
+  navigation, and an addon cannot force them to skip the stream-selection
+  page; direct autoplay is a **bundled WebPlayer-specific integration**.
+  Likewise, playback resume position is Stremio account state, not a promise
+  that every third-party native player honours an identical UI path.
+- Multi-episode torrents need strict episode-to-file identity; this initial
+  automatic preferred-play flow is deliberately restricted to validated
+  single-file movies. Never infer file index solely from a matching title.
+
+## Fresh installation and release acceptance
+
+The public release and private `main` must contain the same audited source,
+with `develop` used for QA. A fresh install requires a new machine or clean
+VM, not a destructive reinstall of an existing validation host. Configure
+HTTPS, trusted LAN access, explicit DNS and the effective BitTorrent port;
+install optional offline translation models separately.
+
+Validate before production adoption: installation and reboot persistence,
+Stremio App and WebPlayer playback/seek/Continue Watching, same-account
+My Library installation on a second device, one cached single-file movie,
+three distinct subtitle selections and cached SRT retrieval, IPTV channels
+in browser and native App, Intel VAAPI and available NVIDIA transcoding,
+configuration persistence, rollback, and no leaked credentials in Git.
+**Do not** invoke `docker compose down -v` for an upgrade: it removes user
+media, downloads, translated subtitles and settings.

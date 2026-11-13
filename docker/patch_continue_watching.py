@@ -238,6 +238,52 @@ def patch_initial_resume(text: str) -> tuple[str, int]:
         )
     return pattern.subn(repl, text)
 
+def patch_preferred_direct_play(text: str) -> tuple[str, int]:
+    """Only Continue Watching cards override poster/circular Play navigation.
+
+    Both other movie cards and the explicit Details context option keep the
+    original Stremio navigation. Fallback happens when the server has no safe
+    preferred source or the signed-in account cannot be verified.
+    """
+    marker = 'stremio-webadmin:preferred-resume-v1'
+    if marker in text:
+        return text, 0
+    # MetaItem is a shared component: the extra prop only exists on cards
+    # rendered by ContinueWatchingItem, so all other posters stay unchanged.
+    old_click = ('F=_.useCallback(function(e){e.nativeEvent.selectPrevented?'
+        'e.preventDefault():"string"==typeof k?(e.preventDefault(),W(k)):'
+        '"function"==typeof g.onClick&&g.onClick(e)},[k,W,g.onClick])')
+    new_click = ('F=_.useCallback(function(e){'
+        'if("string"==typeof g.__stremioContinuePreferred&&'
+        'window.__stremioPreferredResume&&!e.nativeEvent.selectPrevented){'
+        'e.preventDefault(),window.__stremioPreferredResume('
+        'g.__stremioContinuePreferred,function(){'
+        '"string"==typeof k?W(k):"function"==typeof g.onClick&&g.onClick(e)});return}'
+        'e.nativeEvent.selectPrevented?e.preventDefault():"string"==typeof k?'
+        '(e.preventDefault(),W(k)):"function"==typeof g.onClick&&g.onClick(e)'
+        '},[k,W,g.onClick,g.__stremioContinuePreferred])')
+    # On Play icon, use the same preference before falling back to the stored
+    # Core deepLink, which carries the user's original resume position.
+    old_icon = ('c=T.useMemo(function(){return r.deepLinks&&"string"==typeof '
+        'r.deepLinks.player?function(e){e.preventDefault(),l(s(r.deepLinks.player))}'
+        ':null},[r.deepLinks])')
+    new_icon = ('c=T.useMemo(function(){return r.deepLinks&&"string"==typeof '
+        'r.deepLinks.player?function(e){e.preventDefault(),'
+        'window.__stremioPreferredResume?window.__stremioPreferredResume('
+        't,function(){l(s(r.deepLinks.player))}):l(s(r.deepLinks.player))}'
+        ':null},[r.deepLinks,t])')
+    old_prop = 'optionOnSelect:R,onPlayClick:c}))'
+    new_prop = ('optionOnSelect:R,onPlayClick:c,'
+        '__stremioContinuePreferred:t}))')
+    counts = [text.count(old_click),text.count(old_icon),text.count(old_prop)]
+    if counts != [1,1,1]:
+        raise RuntimeError('preferred resume main.js signatures changed: '+str(counts))
+    changed=text.replace(old_click,new_click,1)
+    changed=changed.replace(old_icon,new_icon,1)
+    changed=changed.replace(old_prop,new_prop,1)
+    return changed+'\n;/* '+marker+' */\n',3
+
+
 def main() -> int:
     files = sorted(BUILD.rglob("scripts/main.js"))
     if len(files) != 1:
@@ -256,7 +302,8 @@ def main() -> int:
     patched, hls_core_duration_count = patch_hls_core_duration(patched)
     patched, hls_autoplay_count = patch_hls_autoplay_after_attach(patched)
     resume_count = 0
-    if status == 1 or unload_count or hls_resume_count or hls_timeline_count or external_sub_count or hls_autoplay_count or hls_core_duration_count or resume_count:
+    patched, preferred_count = patch_preferred_direct_play(patched)
+    if status == 1 or unload_count or hls_resume_count or hls_timeline_count or external_sub_count or hls_autoplay_count or hls_core_duration_count or resume_count or preferred_count:
         path.write_text(patched, encoding="utf-8")
         print(
             "[web-player] Continue Watching centre Play uses Core player "

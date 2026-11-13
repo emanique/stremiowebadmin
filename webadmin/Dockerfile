@@ -12,6 +12,7 @@ COPY transcoding_profiles.py .
 COPY transcoding_policy_parser.py .
 COPY transcoding_verified_status.py .
 COPY config_reliability.py .
+COPY iptv_management.py .
 COPY addon_links.py .
 COPY WEBADMIN_VERSION .
 COPY static ./static
@@ -19,4 +20,4 @@ ENV PYTHONUNBUFFERED=1
 ENV WEBADMIN_VERSION_FILE=/app/WEBADMIN_VERSION
 EXPOSE 8090
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)" || exit 1
-CMD ["uvicorn", "config_reliability:app", "--host", "0.0.0.0", "--port", "8090"]
+CMD ["uvicorn", "iptv_management:app", "--host", "0.0.0.0", "--port", "8090"]

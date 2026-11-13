@@ -21,10 +21,10 @@
     .transcodeSession{padding:12px;border:1px solid rgba(232,207,105,.2);border-radius:9px;background:rgba(12,25,18,.92)}
     .transcodeSessionHead{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
     .transcodeSessionHead strong{font-size:13px}
-    .transcodeSessionGrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:9px}
+    .transcodeSessionGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:9px}
     .transcodeKv{padding:8px;border-radius:7px;background:rgba(28,49,34,.75)}
     .transcodeKv span{display:block;color:var(--muted);font-size:9px;text-transform:uppercase}
-    .transcodeKv b{display:block;margin-top:3px;font-size:11px;overflow-wrap:anywhere}
+    .transcodeKv b{display:block;margin-top:3px;font-size:11px;overflow-wrap:normal;word-break:normal;min-width:0}
     .transcodeLatest{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .transcodeLatest>div{padding:10px;border:1px solid rgba(232,207,105,.18);border-radius:8px;background:rgba(7,18,11,.72)}
     .transcodeLatest small{display:block;color:var(--muted);margin-bottom:4px}
@@ -63,6 +63,7 @@
           <div><small>Actual runtime</small><code id="tdActualRuntime">—</code></div>
         </div>
         <div class="transcodeHw" id="tdHardware"></div>
+        <div class="transcodeSessions" id="tdIptvNow"></div>
         <div class="transcodeSessions" id="tdSessions"><div class="empty">No active FFmpeg sessions</div></div>
         <div class="transcodeLatest">
           <div><small>Latest policy decision</small><code id="tdDecision">—</code></div>
@@ -88,7 +89,7 @@
     const resources = session.cpuPercent == null ? '—' : `CPU ${Number(session.cpuPercent).toFixed(1)}% · MEM ${Number(session.memoryPercent || 0).toFixed(1)}%`;
     const process = session.pid == null ? '—' : `PID ${session.pid}${session.elapsed ? ' · ' + session.elapsed : ''}`;
     return `<div class="transcodeSession">
-      <div class="transcodeSessionHead"><strong>${session.jobId ? `Job ${esc(session.jobId)}` : `FFmpeg session ${index + 1}`}</strong><span class="badge">${action}</span></div>
+      <div class="transcodeSessionHead"><strong>${session.iptvChannel ? esc(session.iptvChannel.name) : session.jobId ? `Job ${esc(session.jobId)}` : `FFmpeg session ${index + 1}`}</strong><span class="badge">${action}</span></div>
       <div class="transcodeSessionGrid">
         <div class="transcodeKv"><span>Video</span><b>${esc(video)}</b></div>
         <div class="transcodeKv"><span>Audio</span><b>${esc(audio)}</b></div>
@@ -101,7 +102,7 @@
     </div>`;
   }
 
-  function renderTranscoding(data, playback) {
+  function renderTranscoding(data, playback, iptv) {
     if (!document.getElementById('transcodingPanel')) installDashboardPanel();
     if (!data || !data.available) {
       document.getElementById('tdPolicyState').textContent = 'Unavailable';
@@ -115,19 +116,25 @@
     const registryAvailable = !!(playback && Array.isArray(playback.active));
     const playbackRows = registryAvailable ? playback.active : [];
     const activeWorkloads = new Set(playbackRows.map(p => p.workloadId || p.jobId).filter(Boolean));
-    // The registry tracks recent playback requests, not the FFmpeg process lifecycle.
-    // Report live FFmpeg processes even if an HLS job has lost registry correlation.
-    // Do not mislabel unregistered processes as confirmed active playback.
+    const iptvRows = Array.isArray(iptv?.active) ? iptv.active : [];
+    const iptvWorkloads = new Map(iptvRows.filter(x => x.workloadId).map(x => [x.workloadId, x]));
+    // A running FFmpeg process is still relevant when its playback registry
+    // correlation was lost. Keep IPTV channel identification separately.
     const liveSessions = sessions;
     const unmatchedSessions = registryAvailable
-      ? sessions.filter(session => !session.jobId || !activeWorkloads.has(session.jobId))
+      ? sessions.filter(session => !session.jobId ||
+          (!activeWorkloads.has(session.jobId) && !iptvWorkloads.has(session.jobId)))
       : [];
+    const enrichedSessions = sessions.map(session => ({
+      ...session,
+      iptvChannel: iptvWorkloads.get(session.jobId) || null
+    }));
     const waitingForGc = registryAvailable && playbackRows.length === 0 && sessions.length > 0;
     const liveEngines = [...new Set(liveSessions.map(session => session.engine).filter(Boolean))];
     const liveTranscoding = liveSessions.filter(session => session.action === 'transcoding').length;
     const liveDirect = liveSessions.filter(session => session.action === 'direct-stream').length;
     const panel = document.getElementById('transcodingPanel');
-    if (panel) panel.classList.toggle('idle', liveSessions.length === 0);
+    if (panel) panel.classList.toggle('idle', liveSessions.length === 0 && iptvRows.length === 0);
     document.getElementById('tdPolicyState').textContent = `● ${(policy.transcoding_mode || 'auto').toUpperCase()}`;
     document.getElementById('tdMode').textContent = `${String(policy.transcoding_mode || 'auto').toUpperCase()} · ${String(policy.transcoding_hwaccel || 'auto').toUpperCase()}`;
     document.getElementById('tdActive').textContent = `${liveSessions.length} · ${liveTranscoding} transcode · ${liveDirect} direct`;
@@ -151,10 +158,12 @@
     const actualRuntime = document.getElementById('tdActualRuntime');
     if (requestedEffective) requestedEffective.textContent =
       `${String(requested.mode || 'auto').toUpperCase()} / ${String(requested.hwaccel || 'auto').toUpperCase()} / ${requested.videoCodec || '—'} → ${effective.runtimeReady ? 'READY' : 'NOT READY'}`;
-    if (actualRuntime) actualRuntime.textContent = liveSessions.length
-      ? `${liveEngines.map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${liveSessions.length} FFmpeg process(es)${unmatchedSessions.length ? ' · ' + unmatchedSessions.length + ' unregistered playback job(s)' : ''}${waitingForGc ? ' · playback registry empty; verify HLS GC' : ''}`
-      : 'IDLE · no active FFmpeg';
-
+    if (actualRuntime) actualRuntime.textContent = waitingForGc
+      ? `WAITING FOR GC · ${sessions.length} FFmpeg process(es)`
+      : liveSessions.length
+        ? `${liveEngines.map(x => String(x).toUpperCase()).join(' + ') || 'FFMPEG'} · ${liveSessions.length} FFmpeg process(es)`
+          + (unmatchedSessions.length ? ` · ${unmatchedSessions.length} unregistered playback job(s)` : '')
+        : 'IDLE · no active FFmpeg';
     document.getElementById('tdHardware').innerHTML = [
       chip(`VAAPI ${hw.vaapiDevice || ''}`, Boolean(hw.vaapiDevicePresent && (hw.h264Vaapi || hw.hevcVaapi)), !hw.vaapiDevicePresent),
       chip('H.264 VAAPI', Boolean(hw.h264Vaapi)),
@@ -163,11 +172,42 @@
       chip('HEVC NVENC', Boolean(hw.hevcNvenc)),
       chip('libx264 fallback', Boolean(hw.libx264))
     ].join('');
-    document.getElementById('tdSessions').innerHTML = liveSessions.length
-      ? liveSessions.map((session, index) => {
+    const iptvNow = document.getElementById('tdIptvNow');
+    if (iptvNow) {
+      iptvNow.innerHTML = iptvRows.map(channel => {
+        const related = channel.workloadId
+          ? liveSessions.find(s => s.jobId === channel.workloadId) : null;
+        const mode = related
+          ? (related.action === 'transcoding' ? 'TRANSCODING' : 'DIRECT STREAM')
+          : 'SERVER HLS';
+        const engine = related?.engine ? String(related.engine).toUpperCase() : 'CORE';
+        const video = related ? (related.sourceVideo || 'Origem não detectada') + ' → ' + (related.targetVideo || '—') : '—';
+        const audio = related ? (related.sourceAudio || 'Origem não detectada') + ' → ' + (related.targetAudio || '—') : '—';
+        const process = related?.pid == null ? '—' : 'PID ' + related.pid + (related.elapsed ? ' · ' + related.elapsed : '');
+        return `<div class="transcodeSession">
+          <div class="transcodeSessionHead"><strong>IPTV · ${esc(channel.name)}</strong><span class="badge">${esc(mode)}</span></div>
+          <div class="transcodeSessionGrid">
+            <div class="transcodeKv"><span>Canal</span><b>${esc(channel.number ?? (channel.position != null ? 'Posição ' + channel.position : 'Sem número'))}</b></div>
+            <div class="transcodeKv"><span>Grupo</span><b>${esc(channel.group || '—')}</b></div>
+            <div class="transcodeKv"><span>Vídeo</span><b>${esc(video)}</b></div>
+            <div class="transcodeKv"><span>Áudio</span><b>${esc(audio)}</b></div>
+            <div class="transcodeKv"><span>Motor</span><b>${esc(engine)}</b></div>
+            <div class="transcodeKv"><span>Clientes</span><b>${esc(channel.viewers || 1)}</b></div>
+            <div class="transcodeKv"><span>Progresso</span><b>${related?.progress?.fps == null ? '—' : esc(Number(related.progress.fps).toFixed(1) + ' fps')} · ${esc(related?.progress?.speed || '—')}</b></div>
+            <div class="transcodeKv"><span>Processo</span><b>${esc(process)}</b></div>
+            <div class="transcodeKv"><span>Recursos</span><b>${related?.cpuPercent == null ? '—' : esc('CPU ' + Number(related.cpuPercent).toFixed(1) + '% · RAM ' + Number(related.memoryPercent || 0).toFixed(1) + '%')}</b></div>
+          </div>
+          <div class="transcodeKv" style="margin-top:8px"><span>Fluxo</span><b>Fornecedor → Core Stremio → HLS → Cliente</b></div></div>`;
+      }).join('');
+    }
+    const otherSessions = enrichedSessions.filter(session => !session.iptvChannel);
+    document.getElementById('tdSessions').innerHTML = otherSessions.length
+      ? otherSessions.map((session, index) => {
           const html = sessionHtml(session, index);
           const unregistered = registryAvailable && (!session.jobId || !activeWorkloads.has(session.jobId));
-          return unregistered ? html.replace('<span class="badge">', '<span class="badge" title="FFmpeg detected; playback registry does not contain this job">UNREGISTERED · ') : html;
+          return unregistered
+            ? html.replace('<span class="badge">', '<span class="badge" title="FFmpeg process running without a matching playback job">UNREGISTERED · ')
+            : html;
         }).join('')
       : '<div class="empty">No active FFmpeg processes</div>';
     document.getElementById('tdDecision').textContent = data.latestDecision?.decision || 'No policy decision recorded yet';
@@ -179,9 +219,10 @@
 
   async function loadTranscoding() {
     try {
-      const [response, statusResponse] = await Promise.all([
+      const [response, statusResponse, iptvResponse] = await Promise.all([
         fetch('/api/transcoding/status', {cache: 'no-store'}),
-        fetch('/api/status', {cache: 'no-store'}).catch(() => null)
+        fetch('/api/status', {cache: 'no-store'}).catch(() => null),
+        fetch('/api/iptv/playback', {cache: 'no-store'}).catch(() => null)
       ]);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
@@ -192,7 +233,11 @@
           playback = status.playback;
         } catch (error) {}
       }
-      renderTranscoding(data, playback);
+      let iptv = null;
+      if (iptvResponse?.ok) {
+        try { iptv = await iptvResponse.json(); } catch (_) {}
+      }
+      renderTranscoding(data, playback, iptv);
     } catch (error) {
       renderTranscoding({available: false, message: 'Could not read transcoding telemetry.'});
     }

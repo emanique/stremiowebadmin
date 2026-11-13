@@ -28,10 +28,10 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
-import app as legacy
+import docker
 from docker.errors import NotFound
 
-import docker
+import app as legacy
 
 SOURCE_REPO = os.getenv(
     "STREMIO_SOURCE_REPO", "https://github.com/emanique/stremiowebadmin"

@@ -27,4 +27,4 @@ install -m 0644 "$ROOT/systemd/stremio-webadmin-reconcile.timer" /etc/systemd/sy
 systemctl daemon-reload
 systemctl enable --now stremio-webadmin-reconcile.timer
 systemctl start stremio-webadmin-reconcile.service
-echo "Stremio WebAdmin configured. Automatic authorised-Gateway discovery runs via the host reconciler; TCP/UDP port defaults to 6881 when no valid authorisation is found."
+echo "Stremio WebAdmin configured. Register the Gateway host policy/token for BT auto-sync."

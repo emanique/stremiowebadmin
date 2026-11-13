@@ -44,6 +44,8 @@ PROTECTED = frozenset({
     "stremio-cache",
     "transcode",
     ".resume",
+    # Offline subtitle cache: title-bound persistent data, never transcode scratch.
+    ".subtitle-translator",
     "pins.json",
     # Library-UI state, for the same reason pins.json is here. Both live in cache_root beside the
     # torrent data, and both are small and rarely rewritten — so select_evictions, which sorts by
@@ -304,6 +306,13 @@ def select_evictions(
 
 
 def _remove(path: str) -> None:
+    # Only the principal media cache owns title eviction. Subtitle Translator
+    # follows title removal through this central hook, never FFmpeg scratch.
+    root = os.path.dirname(path)
+    name = os.path.basename(path)
+    infohash = None
+    if name and not name.startswith(".") and name not in PROTECTED and os.path.exists(path):
+        infohash = load_name_index(root).get(name)
     if os.path.isdir(path):
         shutil.rmtree(path, ignore_errors=True)
     else:
@@ -311,6 +320,12 @@ def _remove(path: str) -> None:
             os.remove(path)
         except OSError:
             pass
+    if infohash and not os.path.exists(path):
+        try:
+            from stremiosrv.subtitle_translator import delete_title
+            delete_title(root, str(infohash).lower())
+        except (OSError, ValueError) as exc:
+            logger.warning("subtitle cache cleanup failed for %s: %s", name, exc)
 
 
 def evict_once(root: str, budget: int, engine=None, grace: int = 300) -> dict:

@@ -24,6 +24,12 @@ RUN set -eux; \
     chmod +x docker/entrypoint.sh docker/webadmin_entrypoint.py; \
     install -m 0755 docker/ffmpeg_wrapper.py /usr/local/bin/ffmpeg
 
+# CPU-only subtitle translator runtime (no Torch/Stanza or CUDA libraries).
+# Exact versions were validated in an isolated Python 3.12 QA environment.
+# Models are NOT baked into the image; mount them read-only through compose.yaml.
+RUN /usr/local/bin/uv pip install --python /srv/app/.venv/bin/python \
+    "ctranslate2==4.9.0" "sentencepiece==0.2.3" "langdetect==1.0.9"
+
 ENV STREMIOSRV_CACHE_ROOT=/root/.stremio-server
 ENV PATH="/srv/app/.venv/bin:${PATH}"
 ENV STREMIO_SERVER_VERSION_FILE=/srv/app/SERVER_VERSION

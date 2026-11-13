@@ -157,6 +157,41 @@
         }
     }
 
+    // Continue Watching: open the SAME source this Stremio account last used
+    // on this server. Never guess by title and never start a new download.
+    // The server validates account, torrent, recorded filename and completion.
+    window.__stremioPreferredResume = async function (metaId, fallback) {
+        var safeFallback = (typeof fallback === 'function') ? fallback : function () {};
+        if (!/^tt[0-9]{1,16}$/.test(String(metaId || ''))) {
+            safeFallback(); return;
+        }
+        var profile = read('profile');
+        var authKey = profile && profile.auth && profile.auth.key;
+        if (!authKey) { safeFallback(); return; }
+        var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+        var timeout = ctrl ? setTimeout(function () { ctrl.abort(); }, 5000) : null;
+        try {
+            var res = await fetch('/library/api/preferred-resume', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ authKey: authKey, metaId: metaId }),
+                signal: ctrl ? ctrl.signal : undefined,
+            });
+            if (!res.ok) throw new Error('preferred source unavailable: ' + res.status);
+            var data = await res.json();
+            if (data.preferred && typeof data.url === 'string' &&
+                    data.url.startsWith('/#/player/')) {
+                window.location.hash = data.url.slice(2);
+                return;
+            }
+        } catch (e) {
+            console.warn('Preferred playback unavailable; keeping regular Stremio selection.', e);
+        } finally {
+            if (timeout !== null) clearTimeout(timeout);
+        }
+        safeFallback();
+    };
+
     // Track HLS jobs used by the SPA. The upstream web player creates /hlsv2 jobs but does not
     // call the server's /destroy endpoint when its logical player is closed. Since the SPA remains
     // loaded, page unload cannot be relied on and ffmpeg can otherwise continue reading the source.

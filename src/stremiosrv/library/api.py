@@ -59,6 +59,11 @@ class ContinueDebugBody(BaseModel):
     items: list[dict] = []
 
 
+class PreferredResumeBody(BaseModel):
+    authKey: str
+    metaId: str
+
+
 class LoginBody(BaseModel):
     email: str
     password: str
@@ -263,6 +268,75 @@ def ensure_account_addon(body: SessionBody, request: Request) -> dict:
         raise HTTPException(status_code=502, detail="could not update Stremio addons") from None
     return {"ok": True, "changed": True, "allowed": True,
             "userId": user.get("_id")}
+
+
+@router.post("/api/preferred-resume")
+def preferred_resume(body: PreferredResumeBody, request: Request) -> dict:
+    """Resolve a saved, playable source for this account's Continue Watching card.
+
+    Without a verified preference, tell the browser to take the original
+    navigation path. Neither a title-name match nor a different torrent is a
+    substitute. This endpoint never starts a download or mutates a preference.
+    """
+    _require_same_origin(request)
+    s=_settings(request)
+    peer=request.client.host if request.client else ''
+    ip=netguard.client_ip(peer,request.headers.get('x-forwarded-for',''))
+    if not netguard.is_allowed(ip,netguard.parse_allow(s.library_addon_allow)):
+        raise HTTPException(status_code=404)
+    if not re.fullmatch(r'tt[0-9]{1,16}',body.metaId or ''):
+        return {'preferred':False}
+    if not body.authKey:
+        raise HTTPException(status_code=401)
+    try:
+        user=stremio_api.get_user(body.authKey)
+    except stremio_api.StremioApiError:
+        raise HTTPException(status_code=401,detail='invalid Stremio session') from None
+    uid=str(user.get('_id') or '')
+    if not uid:
+        raise HTTPException(status_code=401)
+    if s.library_owner and s.library_owner not in (uid,str(user.get('email') or '')):
+        raise HTTPException(status_code=403)
+    owner=sessionmod.load_state(s.cache_root).get('owner_id')
+    if owner and uid!=owner:
+        raise HTTPException(status_code=403)
+    # Build the real state: no filename-only guesses and no stream from a
+    # partially downloaded, wrong, or ambiguous torrent file.
+    state=statemod.build(s.cache_root,request.app.state.engine,budget=int(s.cache_size))
+    candidates=[]
+    for entry in state.get('entries',[]):
+        label=entry.get('label') or {}
+        if label.get('metaId')!=body.metaId or label.get('type')!='movie':
+            continue
+        idx=label.get('preferredFileIdx')
+        if not isinstance(idx,int) or idx!=0:
+            continue
+        # Only a single-file movie is covered by preference recording at this
+        # stage; avoids guessing a season pack's index or episode.
+        if entry.get('numFiles')!=1:
+            continue
+        recorded=labelsmod.file_record(label.get('file'))
+        if recorded is None:
+            continue
+        file_idx=addonmodel._recorded_index(entry,recorded)
+        if file_idx!=idx:
+            continue
+        candidates.append((entry,idx))
+    if len(candidates)!=1:
+        return {'preferred':False}
+    entry,idx=candidates[0]
+    ih=entry['infoHash'].lower()
+    found=next((f for f in entry.get('files',[]) if f.get('index')==idx),None)
+    if not found:
+        return {'preferred':False}
+    basename=addonmodel._basename(found.get('name') or '')
+    route=_player_link(PlayerLinkBody(
+        infoHash=ih,fileIdx=idx,name='My Library',filename=basename,
+        streamTransportUrl=_addon_url(request,sessionmod.ensure_addon_token(s.cache_root)),
+        metaTransportUrl='https://v3-cinemeta.strem.io/manifest.json',
+        type='movie',metaId=body.metaId,videoId=body.metaId,
+    ))
+    return {'preferred':True,'url':route,'source':'My Library'}
 
 
 @router.post("/api/addon/reset", dependencies=[Depends(require_session)])
