@@ -961,7 +961,7 @@ def qr():
 # A save must never recreate the Core or touch the HLS/download caches.
 _SUBTITLE_SETTINGS_FILE = Path('/config/subtitle-translator-settings.json')
 _SUBTITLE_MODEL_ROOT = Path('/opt/stremio-subtitle-models')
-_SUBTITLE_DEFAULT_ORDER = ('en', 'fr', 'es')
+_SUBTITLE_DEFAULT_ORDER = ('en', 'fr', 'es', 'ru', 'cs')
 _SUBTITLE_NAMES = {
  'en':'Inglês', 'fr':'Francês', 'es':'Espanhol', 'de':'Alemão', 'it':'Italiano',
  'ru':'Russo', 'nl':'Neerlandês', 'pl':'Polaco', 'ar':'Árabe', 'zh':'Chinês',
@@ -983,7 +983,9 @@ def _installed_subtitle_pairs() -> set[tuple[str,str]]:
             if (folder.is_dir() and not folder.is_symlink() and
                 re.fullmatch(r'[a-z]{2}_[a-z]{2}', folder.name) and
                 all((folder / rel).is_file() for rel in
-                    ('model/model.bin','model/config.json','sentencepiece.model')))
+                    ('model/model.bin','model/config.json')) and
+                any((folder / name).is_file() and not (folder / name).is_symlink()
+                    for name in ('sentencepiece.model', 'bpe.model')))
         }
     except OSError:
         return set()
