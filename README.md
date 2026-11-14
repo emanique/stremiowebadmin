@@ -152,22 +152,42 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 
 ## 📦 Installation
 
-### Install from the public Git repository
+### Install from the public Git repository — fresh snapshot / QA candidate
 
-Numa máquina limpa Debian/Ubuntu com `systemd`, utilize a tag estável para obter uma instalação reproduzível. O instalador verifica ou instala as dependências Docker Engine, Compose v2, Buildx, Nginx, Python, OpenSSL e utilitários de rede:
+Para uma máquina limpa (incluindo rollback do snapshot sem dados), usar o código
+público `main` da candidata **v0.1.5-rc.3**. O instalador verifica ou instala
+Docker Engine, Compose v2, Buildx, Nginx, Python, OpenSSL, curl e utilitários
+de rede. Instala também **quatro modelos offline** verificados por SHA-256:
+`en_pt`, `fr_en`, `es_pt` e `ru_en`.
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y git
-sudo git clone --branch v0.1.4 --depth 1 \
+sudo git clone --branch main --depth 1 \
   https://github.com/emanique/stremiowebadmin.git \
   /opt/stremio-server-webadmin
 sudo sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh
 ```
 
-A instalação compila Core e WebAdmin localmente e cria a configuração protegida somente se não existir. Não pressupõe IP, certificado ou modelos de tradução previamente provisionados. Para obter desenvolvimentos posteriores à tag, consulte o `main` público, sabendo que o seu conteúdo pode já não coincidir com os pacotes versionados da release.
+Este procedimento só é para máquina sem instalação Stremio existente. O modelo
+russo segue `ru → en → pt`; as legendas são traduzidas localmente. Os binários
+Argos são obtidos de fontes externas com checksums fixos; o instalador interrompe
+a operação caso falhe a verificação/download, sem ignorar a falha. Para uma
+instalação intencionalmente sem modelos (por exemplo, sem Internet) utilizar
+`sudo STREMIO_PROVISION_SUBTITLE_MODELS=0 sh /opt/stremio-server-webadmin/packaging/stremio-webadmin-setup.sh`
+e executar o provisionamento mais tarde.
 
-**Não use estes comandos de clone sobre um servidor com instalação existente**. Para upgrades, siga `docs/UPGRADE_GUIDE.md` e preserve `.env`, certificados, volumes Docker e cache.
+**Os modelos não são colocados no GitHub**. `.env`, certificados, caches,
+playlists IPTV, tokens de VPN e definições locais também não são publicados.
+A porta BT é inicialmente `6881` até ser associada a política/lease válido
+do VPN Gateway. Acesso HTTPS ao WebAdmin está limitado à LAN administrativa.
+
+A versão estável histórica continua disponível na tag `v0.1.4`, mas essa tag
+**não contém** as últimas correcções por hash nem o bootstrap dos quatro
+modelos. O `main` contém uma candidata de QA, não uma release estável.
+
+**Não use estes comandos sobre um servidor com instalação existente**.
+Para upgrades preserve a configuração, certificados e volumes Docker.
 
 
 
