@@ -342,6 +342,14 @@ def purge_title(root: str, infohash: str, names: tuple[str, ...] = ()) -> dict:
         index = load_name_index(root)
         aliases = set(names)
         aliases.update(n for n, h in index.items() if str(h).lower() == ih)
+        # A cached title may have a learned file label even when the resume
+        # name index was never written. Only plain direct children are removed.
+        from stremiosrv.library import labels as labelsmod
+        label = labelsmod.load(root).get(ih)
+        if isinstance(label, dict) and isinstance(label.get("file"), dict):
+            candidate = label["file"].get("name")
+            if isinstance(candidate, str):
+                aliases.add(candidate)
         for name in sorted(aliases):
             if (not isinstance(name, str) or not name or name in (".", "..")
                     or os.path.basename(name) != name or name in PROTECTED
