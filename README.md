@@ -155,7 +155,7 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 ### Install from the public Git repository — fresh snapshot / QA candidate
 
 Para uma máquina limpa (incluindo rollback do snapshot sem dados), usar o código
-público `main` da candidata **v0.1.5-rc.4**. O instalador verifica ou instala
+público `main` da candidata **v0.1.5-rc.5**. O instalador verifica ou instala
 Docker Engine, Compose v2, Buildx, Nginx, Python, OpenSSL, curl e utilitários
 de rede. Instala também **cinco modelos offline** verificados por SHA-256:
 `en_pt`, `fr_en`, `es_pt`, `ru_en` e `cs_en` (BPE/Moses).
@@ -464,3 +464,21 @@ This is a standalone derivative distribution. It tracks Stremio Core and a WebAd
 ---
 
 <sub>Maintained for self-hosted deployment. Screenshots sanitizadas e resultados de fresh install serão publicados após validação funcional independente.</sub>
+
+
+### Diagnóstico de streams e disponibilidade de legendas
+
+O WebAdmin disponibiliza **Streams & Cache → Detalhes** para consultar os peers,
+velocidade de download/upload e bytes transferidos directamente no Core.
+O endpoint administrativo é apenas de leitura e omite IPs dos peers.
+A App Stremio é um cliente independente: este desenvolvimento não modifica o
+painel Statistics nativo da App nem força a sua apresentação.
+
+O tradutor só anuncia legendas se existir um SRT/VTT local, uma faixa de texto
+incorporada, uma fonte capturada na cache do hash, ou um fornecedor de legendas
+configurado que devolva uma fonte compatível. Quando o fornecedor responde
+com uma lista vazia, nenhum modelo de tradução consegue criar uma legenda
+sem texto de origem. Podem configurar-se até três manifestos HTTPS através do
+parâmetro `subtitle_source_addons`, respeitando as necessidades de autenticação
+do fornecedor. As legendas originais e o aviso introdutório da tradução
+mantêm-se intactos.

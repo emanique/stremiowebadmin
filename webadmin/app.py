@@ -1076,3 +1076,22 @@ def subtitle_translator_save(body: SubtitleTranslatorPreferences):
                 os.unlink(temporary)
         audit("subtitle-translator.preferences", ",".join(languages))
         return _subtitle_config_payload()
+
+@app.get("/api/streams/{info_hash}/diagnostics")
+def stream_diagnostics(info_hash: str):
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", info_hash):
+        raise HTTPException(400, "Invalid torrent hash")
+    raw = get_json(f"/{info_hash.lower()}/stats.json", None)
+    if raw is None:
+        raise HTTPException(503, "Core torrent metrics unavailable")
+    if not isinstance(raw, dict) or str(raw.get("infoHash","")).lower() != info_hash.lower():
+        raise HTTPException(404, "Torrent not active")
+    return {
+        "infoHash": info_hash.lower(),
+        "name": str(raw.get("name") or "")[:160],
+        "peers": max(0, int(raw.get("peers") or 0)),
+        "downloadSpeed": max(0, int(raw.get("downloadSpeed") or 0)),
+        "uploadSpeed": max(0, int(raw.get("uploadSpeed") or 0)),
+        "downloaded": max(0, int(raw.get("downloaded") or 0)),
+        "filesWithMetadata": len(raw.get("files") or []),
+    }
