@@ -197,7 +197,11 @@ def data_bytes(path: str, st) -> int:
 def _stat_tree(path: str) -> tuple[int, float]:
     """(total size in bytes, newest mtime) for a file or directory tree."""
     if os.path.isfile(path):
-        st = os.stat(path)
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            # A concurrent atomic rename/remove may win between isfile and stat.
+            return 0, 0.0
         return _real_size(st), st.st_mtime
     total = 0
     latest = 0.0
@@ -306,13 +310,8 @@ def select_evictions(
 
 
 def _remove(path: str) -> None:
-    # Only the principal media cache owns title eviction. Subtitle Translator
-    # follows title removal through this central hook, never FFmpeg scratch.
-    root = os.path.dirname(path)
-    name = os.path.basename(path)
-    infohash = None
-    if name and not name.startswith(".") and name not in PROTECTED and os.path.exists(path):
-        infohash = load_name_index(root).get(name)
+    # File removal is intentionally low-level. Hash association cleanup happens
+    # only after the complete hash has left the principal cache (purge_title).
     if os.path.isdir(path):
         shutil.rmtree(path, ignore_errors=True)
     else:
@@ -320,12 +319,64 @@ def _remove(path: str) -> None:
             os.remove(path)
         except OSError:
             pass
-    if infohash and not os.path.exists(path):
-        try:
-            from stremiosrv.subtitle_translator import delete_title
-            delete_title(root, str(infohash).lower())
-        except (OSError, ValueError) as exc:
-            logger.warning("subtitle cache cleanup failed for %s: %s", name, exc)
+
+
+# Serialises explicit purge operations inside one process. Index writers may run
+# independently; only the final on-disk state is authoritative for cache lifetime.
+_TITLE_PURGE_LOCK = threading.RLock()
+_HASH_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def purge_title(root: str, infohash: str, names: tuple[str, ...] = ()) -> dict:
+    """Remove all media and persistent state tied to one verified torrent hash.
+
+    Caller must stop the active torrent first. Never remove model binaries,
+    unrelated torrents or global Continue Watching. Name aliases are resolved
+    from the persisted index; caller-provided names must already be trusted.
+    """
+    ih = str(infohash).lower()
+    if not _HASH_RE.fullmatch(ih):
+        raise ValueError("invalid torrent infohash")
+    removed = []
+    with _TITLE_PURGE_LOCK:
+        index = load_name_index(root)
+        aliases = set(names)
+        aliases.update(n for n, h in index.items() if str(h).lower() == ih)
+        for name in sorted(aliases):
+            if (not isinstance(name, str) or not name or name in (".", "..")
+                    or os.path.basename(name) != name or name in PROTECTED
+                    or name.startswith(".") or "/" in name or "\\" in name):
+                continue
+            target = os.path.join(root, name)
+            if os.path.islink(target):
+                continue
+            if os.path.exists(target):
+                _remove(target)
+                if os.path.exists(target):
+                    raise OSError(f"could not remove cache title: {name}")
+                removed.append(name)
+        for relative in (f".{ih}.parts", os.path.join(".resume", f"{ih}.fastresume")):
+            path = os.path.join(root, relative)
+            if os.path.islink(path):
+                continue
+            if os.path.exists(path):
+                _remove(path)
+                if os.path.exists(path):
+                    raise OSError(f"could not remove torrent artefact: {relative}")
+        current = load_name_index(root)
+        remaining = {n: h for n, h in current.items() if str(h).lower() != ih}
+        if remaining != current:
+            save_name_index(root, remaining)
+        from stremiosrv.library import labels as labelsmod
+        from stremiosrv.subtitle_translator import delete_title
+        labelsmod.drop(root, ih)
+        delete_title(root, ih)
+        wantedmod.drop(root, ih)
+        pins = pinsmod.load_pins(root)
+        kept = [row for row in pins if str(row.get("infoHash", "")).lower() != ih]
+        if len(kept) != len(pins):
+            pinsmod.save_pins(root, kept)
+    return {"hash": ih, "removed": bool(removed), "names": removed}
 
 
 def evict_once(root: str, budget: int, engine=None, grace: int = 300) -> dict:
@@ -379,15 +430,19 @@ def evict_once(root: str, budget: int, engine=None, grace: int = 300) -> dict:
             (total - media_budget) / 1073741824, len(in_use), len(items), held / 1073741824, grace,
         )
     deleted = []
+    purged_hashes: set[str] = set()
+    index = load_name_index(root)
     for v in victims:
-        ih = name_hash.get(v["name"])
-        if engine is not None and ih:
-            engine.remove(ih)  # stop libtorrent before deleting its files
-        _remove(v["path"])
-        # ...and the holding file that belongs to it, or the next pass finds an orphan whose
-        # torrent no longer exists and which nothing will ever claim.
-        if ih:
-            _remove(os.path.join(root, f".{ih}.parts"))
+        ih = name_hash.get(v["name"]) or index.get(v["name"])
+        if ih and _HASH_RE.fullmatch(str(ih).lower()):
+            if ih.lower() in purged_hashes:
+                continue
+            if engine is not None:
+                engine.remove(ih)  # stop libtorrent before deleting its files
+            purge_title(root, ih)
+            purged_hashes.add(ih.lower())
+        else:
+            _remove(v["path"])
         deleted.append({"name": v["name"], "size": v["size"]})
         # Age is the diagnostic that was missing: "last served 41m ago" is a clean reclaim,
         # "last served 6m ago" means a viewer just lost their stream. `unserved` = never requested
@@ -398,7 +453,8 @@ def evict_once(root: str, budget: int, engine=None, grace: int = 300) -> dict:
             v["name"], ih or "no-handle", v["size"] / 1048576,
             f"{age / 60:.0f}m ago" if age is not None else "unserved",
         )
-    return {"before": total, "after": total - sum(d["size"] for d in deleted), "deleted": deleted}
+    return {"before": total, "after": sum(i["size"] for i in scan_cache(root)),
+            "deleted": deleted}
 
 
 # --- fast-resume records ------------------------------------------------------------------------
