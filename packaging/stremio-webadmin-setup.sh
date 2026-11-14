@@ -18,6 +18,16 @@ fi
 python3 "$ROOT/scripts/validate-existing-deployment.py" "$ROOT/.env"
 python3 "$ROOT/scripts/ensure-port-status.py"
 python3 "$ROOT/scripts/sync-host-dns.py" "$ROOT/.env"
+# A rolled-back clean host has no subtitle binaries. Install all four pinned
+# language pairs before starting the containers, using only trusted checksums.
+# Set STREMIO_PROVISION_SUBTITLE_MODELS=0 explicitly for an offline Core-only install.
+if [ "${STREMIO_PROVISION_SUBTITLE_MODELS:-1}" = '1' ]; then
+  model_dir=$(python3 "$ROOT/scripts/resolve-subtitle-model-dir.py" "$ROOT/.env" "$ROOT")
+  STREMIOSRV_SUBTITLE_MODELS_DIR="$model_dir" bash "$ROOT/scripts/provision-subtitle-models.sh" --download-and-install
+  STREMIOSRV_SUBTITLE_MODELS_DIR="$model_dir" bash "$ROOT/scripts/provision-subtitle-models.sh" --verify
+elif [ "${STREMIO_PROVISION_SUBTITLE_MODELS:-1}" != '0' ]; then
+  echo "Invalid STREMIO_PROVISION_SUBTITLE_MODELS (use 1 or 0)" >&2; exit 1
+fi
 python3 "$ROOT/scripts/configure-host-https.py" --apply
 cd "$ROOT"
 sh ./start.sh config --quiet
