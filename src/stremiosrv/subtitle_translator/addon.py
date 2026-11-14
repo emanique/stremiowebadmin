@@ -207,7 +207,7 @@ def _existing_local_tracks(root: str, ih: str, video_id: str) -> list[dict]:
     media = _cached_media_for_infohash(root, ih, video_id)
     if media is None:
         return result
-    for lang in ("en", "fr", "es"):
+    for lang in ("en", "fr", "es", "ru", "cs"):
         for ext in ("srt", "vtt", "ass", "ssa"):
             name = f"{media.stem}.{lang}.{ext}"
             sidecar = media.parent / name
@@ -226,6 +226,8 @@ _EMBEDDED_LANGUAGE = {
     "en": "en", "eng": "en", "english": "en",
     "fr": "fr", "fra": "fr", "fre": "fr", "french": "fr",
     "es": "es", "spa": "es", "spanish": "es",
+    "cs": "cs", "ces": "cs", "cze": "cs", "czech": "cs",
+    "ru": "ru", "rus": "ru", "russian": "ru",
 }
 _TEXT_SUBTITLE_CODECS = frozenset(("subrip", "ass", "ssa", "webvtt", "mov_text", "text"))
 
@@ -393,7 +395,7 @@ def _provider_video_id(root: str, video_id: str, infohash: str) -> str:
 
 
 _TRANSLATOR_SETTINGS = Path("/config/subtitle-translator-settings.json")
-_DEFAULT_SOURCE_PRIORITY = ("en", "fr", "es")
+_DEFAULT_SOURCE_PRIORITY = ("en", "fr", "es", "ru", "cs")
 
 
 def _installed_source_codes() -> tuple[str, ...]:

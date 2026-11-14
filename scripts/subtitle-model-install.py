@@ -41,7 +41,7 @@ def install(archive: Path, destination: Path, sha256: str) -> Path:
         root = roots.pop()
         prefix = root + "/"
         members = {
-            "metadata.json", "sentencepiece.model",
+            "metadata.json", "sentencepiece.model", "bpe.model",
             "model/model.bin", "model/config.json",
             "model/shared_vocabulary.json",
             "model/source_vocabulary.json",
@@ -56,8 +56,10 @@ def install(archive: Path, destination: Path, sha256: str) -> Path:
         if not (isinstance(source, str) and PAIR.fullmatch(source)
                 and isinstance(target, str) and PAIR.fullmatch(target)):
             raise ValueError("invalid model language pair")
-        required = {"sentencepiece.model", "model/model.bin", "model/config.json"}
-        if any(prefix + name not in names for name in required):
+        required = {"model/model.bin", "model/config.json"}
+        if (any(prefix + name not in names for name in required)
+                or not any(prefix + kind in names
+                           for kind in ("sentencepiece.model", "bpe.model"))):
             raise ValueError("incomplete inference model")
         if any(x.filename.startswith("/") or ".." in Path(x.filename).parts for x in items):
             raise ValueError("unsafe model archive paths")

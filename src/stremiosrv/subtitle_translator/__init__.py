@@ -40,7 +40,7 @@ _TIME_LINE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s+-->\s+")
 
 _SOURCE_LANGUAGE_NAMES = {
     'en':'Inglês','fr':'Francês','es':'Espanhol','de':'Alemão',
-    'ru':'Russo','pl':'Polaco','nl':'Neerlandês','bg':'Búlgaro',
+    'ru':'Russo','cs':'Checo','pl':'Polaco','nl':'Neerlandês','bg':'Búlgaro',
     'el':'Grego','bn':'Bengali','et':'Estónio','eu':'Basco',
     'gl':'Galego','ky':'Quirguiz','lv':'Letão','ms':'Malaio',
     'nb':'Norueguês','sk':'Eslovaco','sl':'Esloveno','sq':'Albanês',

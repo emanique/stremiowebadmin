@@ -2,7 +2,7 @@
 
 Models are installed separately under STREMIOSRV_SUBTITLE_MODELS_ROOT.
 Expected layout: <root>/<source>_<target>/model/{model.bin,config.json}
-and <root>/<source>_<target>/sentencepiece.model.
+and <root>/<source>_<target>/sentencepiece.model or bpe.model.
 
 No model download or installation occurs on a playback request.
 No Torch, Stanza or full Argos Python runtime is required.
@@ -32,6 +32,36 @@ def model_root() -> Path:
     return Path(os.getenv("STREMIOSRV_SUBTITLE_MODELS_ROOT", DEFAULT_ROOT))
 
 
+class BpeMosesTokenizer:
+    """Argos-compatible BPE tokenizer with language-aware Moses normalisation."""
+
+    def __init__(self, base: Path, source: str, target: str):
+        from sacremoses import MosesDetokenizer, MosesPunctNormalizer, MosesTokenizer
+        from subword_nmt.apply_bpe import BPE
+
+        self.normalizer = MosesPunctNormalizer(lang=source)
+        self.tokenizer = MosesTokenizer(lang=source)
+        self.detokenizer = MosesDetokenizer(lang=target)
+        with (base / "bpe.model").open("r", encoding="utf-8") as handle:
+            self.bpe = BPE(handle)
+
+    def encode(self, text: str, out_type=str):
+        normalized = self.normalizer.normalize(text)
+        words = self.tokenizer.tokenize(normalized)
+        return self.bpe.segment_tokens(words)
+
+    def decode(self, tokens):
+        return self.detokenizer.detokenize(" ".join(tokens).replace("@@ ", "").split(" "))
+
+
+def _tokenizer_file(base: Path) -> Path | None:
+    for filename in ("sentencepiece.model", "bpe.model"):
+        candidate = base / filename
+        if candidate.is_file() and not candidate.is_symlink():
+            return candidate
+    return None
+
+
 def installed_pairs(root: Path | None = None) -> set[tuple[str, str]]:
     root = root or model_root()
     if not root.is_dir():
@@ -42,7 +72,7 @@ def installed_pairs(root: Path | None = None) -> set[tuple[str, str]]:
             continue
         if ((entry / "model" / "model.bin").is_file()
                 and (entry / "model" / "config.json").is_file()
-                and (entry / "sentencepiece.model").is_file()):
+                and _tokenizer_file(entry) is not None):
             source, target = entry.name.split("_", 1)
             found.add((source, target))
     return found
@@ -53,7 +83,6 @@ def _load_pair(source: str, target: str, location: str,
                device: str = "cpu"):
     try:
         import ctranslate2
-        import sentencepiece
     except ImportError as exc:
         raise LocalModelUnavailable("ctranslate2/sentencepiece not installed") from exc
     pair = f"{source}_{target}"
@@ -63,7 +92,13 @@ def _load_pair(source: str, target: str, location: str,
     if (source, target) not in installed_pairs(Path(location)):
         raise LocalModelUnavailable(f"model not installed: {pair}")
     with _LOAD_LOCK:
-        sp = sentencepiece.SentencePieceProcessor(model_file=str(base / "sentencepiece.model"))
+        if (base / "sentencepiece.model").is_file():
+            import sentencepiece
+            sp = sentencepiece.SentencePieceProcessor(model_file=str(base / "sentencepiece.model"))
+        elif (base / "bpe.model").is_file():
+            sp = BpeMosesTokenizer(base, source, target)
+        else:
+            raise LocalModelUnavailable(f"missing tokenizer: {pair}")
         translator = ctranslate2.Translator(
             str(base / "model"),
             device=device,
