@@ -28,7 +28,8 @@ RUN set -eux; \
 # Exact versions were validated in an isolated Python 3.12 QA environment.
 # Models are NOT baked into the image; mount them read-only through compose.yaml.
 RUN /usr/local/bin/uv pip install --python /srv/app/.venv/bin/python \
-    "ctranslate2==4.9.0" "sentencepiece==0.2.3" "langdetect==1.0.9"
+    "ctranslate2==4.9.0" "sentencepiece==0.2.3" "langdetect==1.0.9" \
+    "sacremoses==0.1.1" "subword-nmt==0.3.8"
 
 ENV STREMIOSRV_CACHE_ROOT=/root/.stremio-server
 ENV PATH="/srv/app/.venv/bin:${PATH}"

@@ -155,10 +155,10 @@ The WebAdmin and Stremio server have distinct lifecycles; management should rema
 ### Install from the public Git repository — fresh snapshot / QA candidate
 
 Para uma máquina limpa (incluindo rollback do snapshot sem dados), usar o código
-público `main` da candidata **v0.1.5-rc.3**. O instalador verifica ou instala
+público `main` da candidata **v0.1.5-rc.4**. O instalador verifica ou instala
 Docker Engine, Compose v2, Buildx, Nginx, Python, OpenSSL, curl e utilitários
-de rede. Instala também **quatro modelos offline** verificados por SHA-256:
-`en_pt`, `fr_en`, `es_pt` e `ru_en`.
+de rede. Instala também **cinco modelos offline** verificados por SHA-256:
+`en_pt`, `fr_en`, `es_pt`, `ru_en` e `cs_en` (BPE/Moses).
 
 ```bash
 sudo apt-get update
@@ -183,7 +183,7 @@ A porta BT é inicialmente `6881` até ser associada a política/lease válido
 do VPN Gateway. Acesso HTTPS ao WebAdmin está limitado à LAN administrativa.
 
 A versão estável histórica continua disponível na tag `v0.1.4`, mas essa tag
-**não contém** as últimas correcções por hash nem o bootstrap dos quatro
+**não contém** as últimas correcções por hash nem o bootstrap dos cinco
 modelos. O `main` contém uma candidata de QA, não uma release estável.
 
 **Não use estes comandos sobre um servidor com instalação existente**.

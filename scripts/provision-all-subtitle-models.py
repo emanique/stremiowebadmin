@@ -2,7 +2,7 @@
 """Optional Argos CTranslate2 source→English model provisioning for pt-PT.
 
 Fetches the public Argos catalogue and compatible (model.bin, config.json,
-sentencepiece.model) models. Never writes credentials or application state,
+sentencepiece.model or bpe.model) models. Never writes credentials or application state,
 never starts Docker, never removes existing model directories. Requires the
 three SHA-256 pinned baseline models from provision-subtitle-models.sh first.
 
@@ -24,7 +24,7 @@ import zipfile
 
 INDEX='https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json'
 PAIR_RE=re.compile(r'^[a-z]{2}_en$')
-NEEDED=('model/model.bin','model/config.json','sentencepiece.model')
+NEEDED=('model/model.bin','model/config.json')
 MAX_DOWNLOAD=450*1024*1024
 
 
@@ -43,7 +43,7 @@ def fetch_index():
 def installed(dest: Path):
     return (dest.joinpath(*('model/model.bin'.split('/'))).is_file() and
             (dest/'model/config.json').is_file() and
-            (dest/'sentencepiece.model').is_file())
+            ((dest/'sentencepiece.model').is_file() or (dest/'bpe.model').is_file()))
 
 
 def install_model(root:Path, temp_root:Path, code:str,info:dict):
@@ -74,10 +74,11 @@ def install_model(root:Path, temp_root:Path, code:str,info:dict):
                         digest.update(block);out.write(block)
                 with zipfile.ZipFile(archive) as z:
                     files={x.filename.split('/',1)[-1]:x for x in z.infolist() if '/' in x.filename}
-                    if any(key not in files for key in NEEDED):
-                        raise ValueError('non-CTranslate2 legacy package')
+                    if (any(key not in files for key in NEEDED) or
+                            not any(token in files for token in ('sentencepiece.model','bpe.model'))):
+                        raise ValueError('incomplete or unsupported CTranslate2 package')
                     stage=td/pair;stage.mkdir()
-                    for key in (*NEEDED,'model/shared_vocabulary.json'):
+                    for key in (*NEEDED,'sentencepiece.model','bpe.model','model/shared_vocabulary.json'):
                         entry=files.get(key)
                         if entry and not entry.is_dir():
                             target=stage/key;target.parent.mkdir(parents=True,exist_ok=True)
