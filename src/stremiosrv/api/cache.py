@@ -58,18 +58,20 @@ def cache_remove(body: RemoveBody, request: Request) -> dict:
     engine = request.app.state.engine
     ih = _name_to_hash(engine).get(name)
     if ih and engine is not None:
+        # Cancel persisted selectors before removing the live torrent.
+        # Older/test engine stubs implement only remove().
+        if callable(getattr(engine, "unpin", None)):
+            engine.unpin(ih)
+        if callable(getattr(engine, "unwant", None)):
+            engine.unwant(ih)
         engine.remove(ih)  # stop libtorrent before deleting its files
     if not ih:
         # The engine knows only the session, and only pinned and wanted torrents are re-added at
         # startup -- so an ordinary cached title has no handle and no entry there. Without the
         # index its partfile would be left behind, which is the part worth deleting.
         ih = cachemod.load_name_index(root).get(name)
-    cachemod._remove(os.path.join(root, name))
-    # A torrent leaves more than its directory: libtorrent keeps a `.<infohash>.parts` holding file
-    # beside the data (one on a real box held 30 GB) and a fast-resume record under `.resume/`.
-    # /library/api/remove learned this the expensive way; this route had not.
-    if ih and _INFOHASH_RE.match(str(ih)):
-        ih = str(ih).lower()
-        cachemod._remove(os.path.join(root, f".{ih}.parts"))
-        cachemod._remove(os.path.join(root, ".resume", f"{ih}.fastresume"))
+    if ih and _INFOHASH_RE.fullmatch(str(ih)):
+        cachemod.purge_title(root, str(ih), names=(name,))
+    else:
+        cachemod._remove(os.path.join(root, name))
     return {"ok": True}
