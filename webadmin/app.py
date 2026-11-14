@@ -998,3 +998,79 @@ def _installed_subtitle_languages() -> tuple[str,...]:
     return tuple(x for x in _SUBTITLE_DEFAULT_ORDER if x in supported) + tuple(sorted(supported.difference(_SUBTITLE_DEFAULT_ORDER)))
 
 
+
+
+# This API is consumed by the Subtitle Translator tab and must be registered
+# on the same WebAdmin app as the IPTV management routes. Never rebuild Core.
+_SUBTITLE_CONFIG_LOCK = threading.RLock()
+
+
+class SubtitleTranslatorPreferences(BaseModel):
+    languages: list[str]
+
+
+def _subtitle_config_payload() -> dict:
+    pairs = _installed_subtitle_pairs()
+    codes = _installed_subtitle_languages()
+    available = []
+    for code in codes:
+        if (code, "pt") in pairs:
+            route = f"{code} → pt-PT"
+            models = f"{code}_pt"
+        else:
+            route = f"{code} → en → pt-PT"
+            models = f"{code}_en + en_pt"
+        available.append({
+            "code": code, "name": _SUBTITLE_NAMES.get(code, code.upper()),
+            "route": route, "model": models,
+        })
+    try:
+        if _SUBTITLE_SETTINGS_FILE.is_symlink():
+            raise ValueError("unsafe preference path")
+        obj = json.loads(_SUBTITLE_SETTINGS_FILE.read_text(encoding="utf-8"))
+        selected = obj.get("languages") if isinstance(obj, dict) else None
+        if (not isinstance(selected, list)
+                or len(selected) != len(set(map(str, selected)))
+                or not all(isinstance(x, str) and x in codes for x in selected)):
+            selected = list(codes)
+    except (OSError, ValueError, TypeError):
+        selected = list(codes)
+    return {"available": available, "languages": selected}
+
+
+@app.get("/api/subtitle-translator/config")
+def subtitle_translator_config():
+    with _SUBTITLE_CONFIG_LOCK:
+        return _subtitle_config_payload()
+
+
+@app.put("/api/subtitle-translator/config")
+def subtitle_translator_save(body: SubtitleTranslatorPreferences):
+    languages = body.languages
+    installed = set(_installed_subtitle_languages())
+    if len(languages) != len(set(languages)) or any(
+        not re.fullmatch(r"[a-z]{2}", code) or code not in installed
+        for code in languages
+    ):
+        raise HTTPException(422, "Invalid, duplicate or unavailable subtitle language")
+    with _SUBTITLE_CONFIG_LOCK:
+        if _SUBTITLE_SETTINGS_FILE.is_symlink():
+            raise HTTPException(409, "Unsafe subtitle preference path")
+        _SUBTITLE_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=".subtitle-translator-", suffix=".tmp",
+            dir=str(_SUBTITLE_SETTINGS_FILE.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump({"languages": languages}, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, _SUBTITLE_SETTINGS_FILE)
+        except OSError as exc:
+            raise HTTPException(503, f"Could not save subtitle preferences: {exc}") from exc
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        audit("subtitle-translator.preferences", ",".join(languages))
+        return _subtitle_config_payload()
