@@ -642,8 +642,10 @@ def unpin(info_hash: str):
 
 @app.delete("/api/streams/{info_hash}")
 def remove(info_hash: str):
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", info_hash):
+        raise HTTPException(400, "invalid infohash")
     audit("stream.remove", info_hash)
-    return relay("GET", f"/{info_hash}/remove")
+    return relay("POST", f"/cache/purge/{info_hash.lower()}")
 
 
 @app.post("/api/cache/remove")
@@ -996,64 +998,3 @@ def _installed_subtitle_languages() -> tuple[str,...]:
     return tuple(x for x in _SUBTITLE_DEFAULT_ORDER if x in supported) + tuple(sorted(supported.difference(_SUBTITLE_DEFAULT_ORDER)))
 
 
-
-class SubtitleLanguageConfig(BaseModel):
-    languages: list[str]
-
-
-def _read_subtitle_languages() -> list[str]:
-    try:
-        payload = json.loads(_SUBTITLE_SETTINGS_FILE.read_text('utf-8'))
-        values = payload.get('languages')
-        installed = _installed_subtitle_languages()
-        if (isinstance(values, list) and len(values) == len(set(map(str, values)))
-                and all(isinstance(value, str) and value in installed for value in values)):
-            return values
-    except (OSError, ValueError, TypeError):
-        pass
-    return list(_installed_subtitle_languages())
-
-
-@app.get('/api/subtitle-translator/config')
-def subtitle_translator_config():
-    return {
-        'target': 'pt-PT',
-        'languages': _read_subtitle_languages(),
-        'available': [
-            {'code': code,
-             'name': _SUBTITLE_NAMES.get(code, code.upper()),
-             'route': code + (' → pt-PT' if (code,'pt') in _installed_subtitle_pairs()
-                     else ' → en → pt-PT'),
-             'model': code + ('_pt' if (code,'pt') in _installed_subtitle_pairs()
-                            else '_en + en_pt'),
-             'installed': True}
-            for code in _installed_subtitle_languages()
-        ],
-        'notInstalled': [],
-        'cache': 'persistent-download-title-bound',
-        'selectionMode': 'manual',
-    }
-
-
-@app.put('/api/subtitle-translator/config')
-def save_subtitle_translator_config(body: SubtitleLanguageConfig):
-    langs = body.languages
-    if (len(langs) != len(set(langs)) or
-            any(type(code) is not str or code not in _installed_subtitle_languages() for code in langs)):
-        raise HTTPException(400, 'Only unique installed source languages are allowed')
-    with CONFIG_LOCK:
-        _SUBTITLE_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        data = json.dumps({'languages': langs, 'target': 'pt-PT'}, separators=(',', ':'))
-        fd, tmp = tempfile.mkstemp(prefix='.subtitle-translator-', suffix='.tmp', dir=_SUBTITLE_SETTINGS_FILE.parent)
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, _SUBTITLE_SETTINGS_FILE)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-    audit('subtitle-translator.sources.update', ','.join(langs) or 'none')
-    return {'ok': True, 'languages': langs, 'restartRequired': False}
