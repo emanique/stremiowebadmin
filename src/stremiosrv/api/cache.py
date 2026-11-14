@@ -46,6 +46,26 @@ def cache_list(request: Request) -> list[dict]:
     return out
 
 
+@router.post("/cache/purge/{info_hash}")
+def cache_purge(info_hash: str, request: Request) -> dict:
+    """Explicit cache deletion by torrent hash, used by WebAdmin stream Remove.
+
+    The native /<hash>/remove endpoint remains a session-only detach operation,
+    preserving the Stremio client protocol's expectations.
+    """
+    if not _INFOHASH_RE.fullmatch(info_hash):
+        raise HTTPException(status_code=400, detail="invalid infohash")
+    ih = info_hash.lower()
+    engine = request.app.state.engine
+    if engine is not None:
+        if callable(getattr(engine, "unpin", None)):
+            engine.unpin(ih)
+        if callable(getattr(engine, "unwant", None)):
+            engine.unwant(ih)
+        engine.remove(ih)
+    return {"ok": True, **cachemod.purge_title(request.app.state.settings.cache_root, ih)}
+
+
 @router.post("/cache/remove")
 def cache_remove(body: RemoveBody, request: Request) -> dict:
     """Delete one cache entry. Guard: must be a plain direct child of cache_root and not a
