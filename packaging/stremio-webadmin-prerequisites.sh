@@ -6,7 +6,7 @@ export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 [ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }
 
 need=''
-for pair in 'docker:docker.io' 'nginx:nginx' 'openssl:openssl' 'ip:iproute2' 'python3:python3'; do
+for pair in 'docker:docker.io' 'nginx:nginx' 'openssl:openssl' 'ip:iproute2' 'python3:python3' 'curl:curl'; do
     command=${pair%%:*}
     package=${pair#*:}
     if ! command -v "$command" >/dev/null 2>&1; then
