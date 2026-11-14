@@ -28,6 +28,7 @@ _CONFIG_WEB = "appliance config-web calls :11470 directly"
 ORIGIN_ONLY = {
     "/cache.json": _CONFIG_WEB,
     "/cache/remove": _CONFIG_WEB,
+    "/cache/purge/{info_hash}": "privileged WebAdmin-to-Core deletion; direct API origin only, never public WebPlayer",
     "/pins.json": _CONFIG_WEB,
     "/{info_hash}/pin": _CONFIG_WEB,
     "/{info_hash}/unpin": _CONFIG_WEB,
@@ -130,7 +131,7 @@ def test_unauthenticated_routes_stay_origin_only():
     """The library UI adds an AUTHENTICATED namespace on the public origin. These routes have no
     auth at all and must never join it — proxying them through nginx would hand the cache list and
     pin controls to the internet."""
-    for path in ("/cache.json", "/cache/remove", "/pins.json",
+    for path in ("/cache.json", "/cache/remove", "/cache/purge/{info_hash}", "/pins.json",
                  "/{info_hash}/pin", "/{info_hash}/unpin"):
         assert path in ORIGIN_ONLY, f"{path} must stay origin-only"
 
