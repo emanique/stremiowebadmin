@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Provision exactly the three locally validated CPU subtitle model packages.
+# Provision the four pinned offline translation models for a clean installation.
 # Model binaries, provider credentials and individual subtitles never enter Git.
 set -Eeuo pipefail
 umask 077
@@ -17,6 +17,7 @@ declare -a packages=(
   "translate-en_pt-1_9.argosmodel|0c5350a2fa5b923de1346edc0d42e08e38bab2e33cede3a0b9a48eb4281ad8a9|en_pt|https://data.argosopentech.com/argospm/v1/translate-en_pt-1_9.argosmodel"
   "translate-fr_en-1_9.argosmodel|3b3052fee6bb1e8e8e632a26a723eb2a2c7710dfe73ba61ffd9b83e85d4f14c1|fr_en|https://data.argosopentech.com/argospm/v1/translate-fr_en-1_9.argosmodel"
   "es_pt.argosmodel|c772951dee3917f799b701bde0612331f54e1aa09d709dd057bee6b41bb04936|es_pt|https://argos-net.com/v1/translate-es_pt-1_0.argosmodel"
+  "translate-ru_en-1_9.argosmodel|e9ba8bf722d10a4a4c39f74289d5938fd47eac08dbe4ed0afd22d89445a5c3ac|ru_en|https://data.argosopentech.com/argospm/v1/translate-ru_en-1_9.argosmodel"
 )
 for item in "${packages[@]}"; do
   IFS='|' read -r filename expected pair source <<< "$item"
@@ -25,12 +26,17 @@ for item in "${packages[@]}"; do
   if [[ -d "$installed" ]]; then
     python3 - "$installed/INSTALL.json" "$expected" "$pair" <<'PY'
 import json, pathlib, sys
-meta = json.loads(pathlib.Path(sys.argv[1]).read_text())
+meta_path = pathlib.Path(sys.argv[1])
 expected = sys.argv[2]; src, dst = sys.argv[3].split("_")
-assert (meta.get("source"),meta.get("target"),meta.get("sha256")) == (src,dst,expected)
-folder=pathlib.Path(sys.argv[1]).parent
+folder=meta_path.parent
 for name in ("model/model.bin","model/config.json","sentencepiece.model"):
     assert (folder / name).is_file(), name
+if meta_path.is_file():
+    meta=json.loads(meta_path.read_text())
+    assert (meta.get("source"),meta.get("target"),meta.get("sha256")) == (src,dst,expected)
+else:
+    provenance=folder/"SOURCE_SHA256.txt"
+    assert provenance.is_file() and provenance.read_text().split()[0] == expected, "missing verified model provenance"
 PY
     echo "[model] verified installed $pair"
     continue
@@ -50,4 +56,4 @@ PY
       --package "$archive" --destination "$DEST" --sha256 "$expected"
   fi
 done
-echo "[model] all three offline model paths verified: en->pt, fr->en->pt, es->pt"
+echo "[model] all four offline model paths verified: en->pt, fr->en->pt, es->pt, ru->en->pt"
