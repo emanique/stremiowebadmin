@@ -58,3 +58,11 @@ def test_model_discovery_requires_complete_directory(tmp_path):
 def test_missing_model_is_explicit(tmp_path):
     with pytest.raises(LocalModelUnavailable):
         translate_many(["Hola"], "es", root=tmp_path)
+
+def test_model_discovery_accepts_bpe_without_sentencepiece(tmp_path):
+    folder = tmp_path / "cs_en"
+    (folder / "model").mkdir(parents=True)
+    (folder / "model/model.bin").write_bytes(b"test")
+    (folder / "model/config.json").write_text("{}")
+    (folder / "bpe.model").write_text("#version: 0.2\ns t\n")
+    assert installed_pairs(tmp_path) == {("cs", "en")}

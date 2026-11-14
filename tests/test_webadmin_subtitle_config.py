@@ -76,3 +76,17 @@ def test_corrupt_preferences_fallback_to_installed(configured):
     prefs.parent.mkdir(parents=True, exist_ok=True)
     prefs.write_text("[]")
     assert client.get("/api/subtitle-translator/config").json()["languages"] == ["en", "fr", "es", "ru"]
+
+def test_czech_bpe_model_is_advertised(tmp_path, monkeypatch):
+    root = tmp_path / "models"
+    for pair, token in (("en_pt", "sentencepiece.model"), ("cs_en", "bpe.model")):
+        base = root / pair
+        (base / "model").mkdir(parents=True)
+        for rel in ("model/model.bin", "model/config.json", token):
+            (base / rel).write_bytes(b"qa")
+    monkeypatch.setattr(legacy, "_SUBTITLE_MODEL_ROOT", root)
+    monkeypatch.setattr(legacy, "_SUBTITLE_SETTINGS_FILE", tmp_path / "fresh-config.json")
+    result = TestClient(web.app).get("/api/subtitle-translator/config")
+    assert result.status_code == 200
+    assert [item["code"] for item in result.json()["available"]] == ["en", "cs"]
+    assert "cs → en → pt-PT" in result.json()["available"][1]["route"]

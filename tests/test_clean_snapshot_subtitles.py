@@ -1,4 +1,4 @@
-"""Fresh snapshot must restore four model paths without bundled binary data."""
+"""Fresh snapshot must restore five model paths without bundled binary data."""
 from __future__ import annotations
 
 import importlib.util
@@ -42,12 +42,13 @@ def test_injected_root_is_rejected(tmp_path, monkeypatch):
         _resolver().resolve(settings, tmp_path)
 
 
-def test_four_models_and_checksum_are_pinned():
+def test_five_models_and_checksum_are_pinned():
     script = (ROOT / "scripts/provision-subtitle-models.sh").read_text()
-    pairs = ("en_pt", "fr_en", "es_pt", "ru_en")
+    pairs = ("en_pt", "fr_en", "es_pt", "ru_en", "cs_en")
     for pair in pairs:
         assert f"|{pair}|" in script
     assert "e9ba8bf722d10a4a4c39f74289d5938fd47eac08dbe4ed0afd22d89445a5c3ac" in script
+    assert "f1683b1ac5e826c7e3db2b0ea5d73191cdd695d6523b112363d8a769203dcb62" in script
     assert "sha256sum -c -" in script
     assert "--download-and-install" in script
 

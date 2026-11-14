@@ -58,3 +58,18 @@ def test_model_package_rejects_missing_metadata(tmp_path):
     sha = hashlib.sha256(archive.read_bytes()).hexdigest()
     with pytest.raises(ValueError, match="metadata"):
         _installer().install(archive, tmp_path / "models", sha)
+
+def test_verified_bpe_archive_install(tmp_path):
+    path = tmp_path / "czech.argosmodel"
+    with zipfile.ZipFile(path, "w") as file:
+        prefix = "translate-cs_en-1_9_6/"
+        file.writestr(prefix + "metadata.json",
+                      json.dumps({"from_code": "cs", "to_code": "en"}))
+        file.writestr(prefix + "bpe.model", "#version: 0.2\ns t\n")
+        file.writestr(prefix + "model/config.json", "{}")
+        file.writestr(prefix + "model/model.bin", b"unit-model")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    result = _installer().install(path, tmp_path / "models", digest)
+    assert result.name == "cs_en"
+    assert (result / "bpe.model").exists()
+    assert not (result / "sentencepiece.model").exists()
