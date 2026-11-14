@@ -97,3 +97,25 @@ def test_evict_title_removes_related_hash_metadata(tmp_path):
     assert not (tmp_path / "same-hash-alias.mkv").exists()
     assert (tmp_path / "film-b.mkv").exists()
     assert A not in json.loads((tmp_path / "labels.json").read_text())
+
+def test_explicit_hash_purge_route_removes_every_alias(tmp_path):
+    fixture_cache(tmp_path)
+    c = TestClient(create_app(settings=Settings(cache_root=str(tmp_path))))
+    assert c.post("/cache/purge/not-a-hash").status_code == 400
+    r = c.post("/cache/purge/" + A.upper())
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"]
+    assert not (tmp_path / "film-a.mkv").exists()
+    assert not (tmp_path / "same-hash-alias.mkv").exists()
+    assert (tmp_path / "film-b.mkv").exists()
+
+
+def test_hash_purge_uses_learned_file_when_index_absent(tmp_path):
+    fixture_cache(tmp_path)
+    cachemod.save_name_index(str(tmp_path), {"film-b.mkv": B})
+    rows = json.loads((tmp_path / "labels.json").read_text())
+    rows[A]["file"] = {"name": "film-a.mkv", "size": 5}
+    (tmp_path / "labels.json").write_text(json.dumps(rows))
+    assert cachemod.purge_title(str(tmp_path), A)["removed"]
+    assert not (tmp_path / "film-a.mkv").exists()
+    assert (tmp_path / "film-b.mkv").exists()
