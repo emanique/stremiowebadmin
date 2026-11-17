@@ -321,6 +321,82 @@ def _iptv_addon() -> dict[str, object]:
     return base
 
 
+def _ai_subtitle_generator_addon() -> dict[str, object]:
+    """Show the independent AI subtitle addon, only installable when runtime is ready."""
+    urls = lifecycle._connection_urls()
+    trusted = bool(urls.get("trustedHttps"))
+    ip = str(urls.get("ip") or "localhost")
+    origin = (str(urls.get("streamingServer") or "").rstrip("/")
+              if trusted else f"https://{ip}:12470")
+    origin = _manifest_origin(origin)
+    trusted = trusted and origin.startswith("https://")
+    base = {
+        "id": "ai-subtitle-generator",
+        "name": "AI Subtitle Generator",
+        "description": "Offline Portuguese (pt-PT) subtitles on demand; only the selected playback interval is processed.",
+        "enabled": False, "ready": False, "manifestUrl": "",
+        "managementUrl": "", "resources": ["subtitles"],
+        "deleteSupported": False,
+        "update": {"mode": "server-runtime", "updateAvailable": False,
+                   "message": "Experimental addon: QA acceptance required before release"},
+        "status": "Core runtime or model not configured.",
+    }
+    try:
+        token = _readonly_cache_addon_token("subtitle")
+        container = lifecycle.legacy.client().containers.get(lifecycle.legacy.CONTAINER)
+        container.reload()
+        env = lifecycle._container_env(container)
+        automatic = env.get("STREMIOSRV_AI_SUBTITLES_ENABLED", "").lower() in ("1", "true", "yes")
+        on_demand = env.get("STREMIOSRV_AI_ON_DEMAND_ENABLED", "").lower() in ("1", "true", "yes")
+        enabled = automatic or on_demand
+        if not token:
+            root = (env.get("STREMIOSRV_CACHE_ROOT") or "/root/.stremio-server").rstrip("/")
+            script = ("from stremiosrv.subtitle_translator.addon import installed_manifest_url; "
+                      f"print(installed_manifest_url({json.dumps(root)}, {json.dumps(origin)}))")
+            result = container.exec_run(["/srv/app/.venv/bin/python", "-c", script])
+            if result.exit_code != 0:
+                return base
+            translator_url = result.output.decode("utf-8", "replace").strip()
+            if not translator_url.startswith(origin + "/subtitle-translator/"):
+                return base
+            token = translator_url.split("/subtitle-translator/", 1)[1].split("/", 1)[0]
+        manifest = lifecycle.legacy.get_json(f"/ai-subtitles/{token}/manifest.json", None)
+        if not isinstance(manifest, dict) or manifest.get("id") != "org.stremiosrv.ai-subtitles":
+            return base
+        base["enabled"] = enabled
+        base["onDemandEnabled"] = on_demand
+        base["version"] = str(manifest.get("version") or "")
+        base["status"] = ("Runtime enabled; verifying local model and trusted HTTPS" if enabled
+                          else "AI Subtitle Generator disabled in Core configuration")
+        # A model path in an environment variable is not evidence that the model is installed.
+        # Do not advertise readiness until the Core verifies it.
+        status = lifecycle.legacy.get_json(f"/ai-subtitles/{token}/status.json", None)
+        snapshot = lifecycle.legacy.get_json(f"/ai-subtitles/{token}/jobs.json", None)
+        if isinstance(snapshot, dict):
+            base["queue"] = {
+                "mode": snapshot.get("mode", "automatic"),
+                "automaticScan": bool(snapshot.get("automaticScan", automatic)),
+                "active": snapshot.get("active"),
+                "jobs": snapshot.get("jobs", [])[:40],
+                "priorityRule": snapshot.get("priorityRule", ""),
+                "coverage": snapshot.get("coverage", ""),
+            }
+        runtime_ready = isinstance(status, dict) and bool(status.get("ready"))
+        # The Core knows whether the optional GPU mode is operational.
+        # Never advertise it if the Core says not ready.
+        ready = enabled and trusted and runtime_ready
+        base["ready"] = ready
+        if ready:
+            base["manifestUrl"] = f"{origin}/ai-subtitles/{token}/manifest.json"
+            base["status"] = ("Ready to install · AI on demand"
+                              if on_demand else "Ready to install in Stremio")
+        elif enabled and trusted:
+            base["status"] = str((status or {}).get("status") or "Runtime prerequisites missing")
+    except Exception:
+        pass
+    return base
+
+
 def addons():
     """Addons currently provided by this server.
 
@@ -328,7 +404,7 @@ def addons():
     changing the WebAdmin UI contract.
     """
     update_state = _server_update_state()
-    return {"addons": [_library_addon(update_state), _iptv_addon(), _subtitle_translator_addon()]}
+    return {"addons": [_library_addon(update_state), _iptv_addon(), _subtitle_translator_addon(), _ai_subtitle_generator_addon()]}
 
 
 def update_library_addon():

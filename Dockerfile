@@ -15,7 +15,7 @@ COPY docker ./docker
 # Upstream 1.6.23 Web Player fix:
 # seed SERVER_URL initially, but preserve a streaming-server URL
 # subsequently selected manually by the user.
-RUN sh docker/install-web-player-loader.sh /srv/stremio-server/build docker/web-player-loader.js
+RUN STREMIOSRV_AI_PLAYER_PATCH=1 sh docker/install-web-player-loader.sh /srv/stremio-server/build docker/web-player-loader.js
 RUN set -eux; \
     mkdir -p /usr/local/libexec/stremio; \
     ln -sf "$(readlink -f "$(command -v ffmpeg)")" /usr/local/libexec/stremio/ffmpeg-real; \
@@ -23,6 +23,10 @@ RUN set -eux; \
     uv sync --no-dev --python 3.12; \
     chmod +x docker/entrypoint.sh docker/webadmin_entrypoint.py; \
     install -m 0755 docker/ffmpeg_wrapper.py /usr/local/bin/ffmpeg
+
+# whisper.cpp CPU builds use the GNU OpenMP runtime; keep it explicit.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # CPU-only subtitle translator runtime (no Torch/Stanza or CUDA libraries).
 # Exact versions were validated in an isolated Python 3.12 QA environment.

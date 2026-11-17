@@ -34,6 +34,14 @@ services:
       STREMIOSRV_SUBTITLE_PUBLIC_ORIGIN: ${STREMIOSRV_SUBTITLE_PUBLIC_ORIGIN:-}
       STREMIOSRV_SUBTITLE_CPU_THREADS: ${STREMIOSRV_SUBTITLE_CPU_THREADS:-2}
       STREMIOSRV_SUBTITLE_DEVICE: ${STREMIOSRV_SUBTITLE_DEVICE:-auto}
+      STREMIOSRV_AI_SUBTITLES_ENABLED: ${STREMIOSRV_AI_SUBTITLES_ENABLED:-false}
+      STREMIOSRV_AI_ON_DEMAND_ENABLED: ${STREMIOSRV_AI_ON_DEMAND_ENABLED:-false}
+      STREMIOSRV_AI_WHISPER_MODEL: /opt/stremio-whisper-models/${STREMIOSRV_AI_WHISPER_MODEL_FILE:-ggml-small.bin}
+      STREMIOSRV_AI_WHISPER_BIN: /opt/stremio-ai-runtime/whisper-cli
+      STREMIOSRV_AI_WHISPER_THREADS: ${STREMIOSRV_AI_WHISPER_THREADS:-2}
+      STREMIOSRV_AI_OPENVINO_URL: ${STREMIOSRV_AI_OPENVINO_URL:-}
+      STREMIOSRV_AI_OPENVINO_TOKEN: ${STREMIOSRV_AI_OPENVINO_TOKEN:-}
+      STREMIOSRV_AI_OPENVINO_WORK_DIR: /opt/ai-work
       TRANSCODING_MODE: ${TRANSCODING_MODE:-auto}
       TRANSCODING_HWACCEL: ${TRANSCODING_HWACCEL:-auto}
       VAAPI_DEVICE: ${VAAPI_DEVICE:-}
@@ -49,6 +57,9 @@ services:
     volumes:
     - ${STREMIO_DATA_DIR:-stremio-cache}:/root/.stremio-server
     - ${STREMIOSRV_SUBTITLE_MODELS_DIR:-./models/subtitles}:/opt/stremio-subtitle-models:ro
+    - ${STREMIOSRV_AI_WHISPER_MODELS_DIR:-./models/whisper}:/opt/stremio-whisper-models:ro
+    - ${STREMIOSRV_AI_RUNTIME_DIR:-./tools/ai-runtime}:/opt/stremio-ai-runtime:ro
+    - ai-transcribe-work:/opt/ai-work
     - stremio-config:/config:ro
     healthcheck:
       test:
@@ -70,6 +81,35 @@ services:
     - ${IPADDRESS:?IP required}:${STREMIOSRV_BT_LISTEN_PORT:-6881}:${STREMIOSRV_BT_LISTEN_PORT:-6881}/udp
     networks:
     - stremio-net
+  ai-openvino:
+    image: whisper-openvino-qa201:local
+    container_name: stremio-ai-openvino
+    profiles:
+    - ai-openvino
+    restart: unless-stopped
+    entrypoint: ["/opt/ov/bin/python", "/opt/ai/ai_openvino_server.py"]
+    environment:
+      AI_BRIDGE_TOKEN: ${STREMIOSRV_AI_OPENVINO_TOKEN:-}
+      AI_WORK_DIR: /opt/ai-work
+      AI_MODEL: /models/ggml-small.bin
+    devices:
+    - /dev/dri/renderD128:/dev/dri/renderD128
+    volumes:
+    - ai-transcribe-work:/opt/ai-work
+    - ./docker/ai_openvino_server.py:/opt/ai/ai_openvino_server.py:ro
+    - ./models/whisper/ggml-small.bin:/models/ggml-small.bin:ro
+    - ./models/openvino/ggml-small-encoder-openvino.bin:/models/ggml-small-encoder-openvino.bin:ro
+    - ./models/openvino/ggml-small-encoder-openvino.xml:/models/ggml-small-encoder-openvino.xml:ro
+    - ai-openvino-shader-cache:/models/ggml-small-encoder-openvino-cache
+    healthcheck:
+      test: ["CMD", "/opt/ov/bin/python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:19098/health',timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 45s
+    networks:
+    - stremio-net
+
   webadmin:
     image: stremioserverwebadmin-webadmin:dev
     container_name: stremio-webadmin
@@ -117,3 +157,5 @@ volumes:
   stremio-cache: null
   stremio-config: null
   webadmin-data: null
+  ai-transcribe-work: null
+  ai-openvino-shader-cache: null

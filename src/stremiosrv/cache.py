@@ -379,6 +379,8 @@ def purge_title(root: str, infohash: str, names: tuple[str, ...] = ()) -> dict:
         from stremiosrv.subtitle_translator import delete_title
         labelsmod.drop(root, ih)
         delete_title(root, ih)
+        from stremiosrv.ai_subtitles.generator import delete_hash as delete_ai_subtitles
+        delete_ai_subtitles(root, ih)
         wantedmod.drop(root, ih)
         pins = pinsmod.load_pins(root)
         kept = [row for row in pins if str(row.get("infoHash", "")).lower() != ih]

@@ -29,6 +29,9 @@ from stremiosrv.iptv import control as iptv_control
 from stremiosrv.library import addon as library_addon
 from stremiosrv.library import api as library_api
 from stremiosrv.subtitle_translator import addon as subtitle_translator_addon
+from stremiosrv.ai_subtitles import addon as ai_subtitle_addon
+from stremiosrv.ai_subtitles.service import AutoSubtitleWorker
+from stremiosrv.ai_subtitles.on_demand import DemandSubtitleSessions
 
 # Exception leaf types that mean "the client went away mid-stream" (vs a real server bug). Matched by
 # name so the check is a pure function (no running event loop needed): asyncio/anyio cancellation is
@@ -144,8 +147,20 @@ class SuppressClientDisconnect:
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
-    yield
-    cache.release_owner(app.state.settings.cache_root)
+    worker = AutoSubtitleWorker(app.state.engine, app.state.settings.cache_root)
+    app.state.ai_subtitle_worker = worker
+    worker.start()
+    demand = None
+    if os.getenv("STREMIOSRV_AI_ON_DEMAND_ENABLED", "false").lower() in ("true", "1", "yes"):
+        demand = DemandSubtitleSessions(app.state.engine, app.state.settings.cache_root)
+    app.state.ai_on_demand = demand
+    try:
+        yield
+    finally:
+        if demand is not None:
+            demand.close()
+        worker.stop()
+        cache.release_owner(app.state.settings.cache_root)
 
 
 def create_app(settings: Settings | None = None, engine=None, converter=None) -> FastAPI:
@@ -185,6 +200,7 @@ def create_app(settings: Settings | None = None, engine=None, converter=None) ->
         app.include_router(iptv_control.router)
     app.include_router(subs.router)
     app.include_router(subtitle_translator_addon.router)
+    app.include_router(ai_subtitle_addon.router)
     app.include_router(embedded_ass.router)
     app.include_router(media_fetch.router)
     app.include_router(casting.router)

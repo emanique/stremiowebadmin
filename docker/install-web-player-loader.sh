@@ -28,6 +28,28 @@ if [ "$FOUND" -ne 1 ]; then
 fi
 
 cp "$LOADER" "$TARGET"
+# QA-on-demand WebPlayer integration. Keep generic loader fixtures unchanged;
+# only the production image contains the additional hook files.
+AI_CODE="$(dirname "$LOADER")/ai-demand-web-player.js"
+AI_PATCH="$(dirname "$LOADER")/install-ai-demand-hook.py"
+if [ "${STREMIOSRV_AI_PLAYER_PATCH:-0}" = "1" ]; then
+    if [ ! -f "$AI_CODE" ] || [ ! -f "$AI_PATCH" ]; then
+        echo "AI WebPlayer hook files missing" >&2
+        exit 1
+    fi
+    python3 "$AI_PATCH" "$BUILD"
+    cat "$AI_CODE" >> "$TARGET"
+    MAIN_REL="${REL%/loader.js}/main.js"
+    MAIN="$BUILD/$MAIN_REL"
+    MAIN_ENTRY="{url:\"$MAIN_REL\",revision:\"[0-9a-f]*\"}"
+    MAIN_FOUND=$(grep -o "$MAIN_ENTRY" "$SW" | wc -l)
+    if [ "$MAIN_FOUND" -ne 1 ]; then
+        echo "install-web-player-loader: main.js precache entry missing" >&2
+        exit 1
+    fi
+    MAIN_REV=$(md5sum "$MAIN" | cut -d' ' -f1)
+    sed -i "s|$MAIN_ENTRY|{url:\"$MAIN_REL\",revision:\"$MAIN_REV\"}|" "$SW"
+fi
 rm -f "$TARGET.map"         # described the replaced bundle; nothing points at it any more
 REV=$(md5sum "$TARGET" | cut -d' ' -f1)
 sed -i "s|$ENTRY|{url:\"$REL\",revision:\"$REV\"}|" "$SW"

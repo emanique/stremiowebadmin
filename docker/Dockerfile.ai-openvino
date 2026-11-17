@@ -1,0 +1,18 @@
+# Optional GPU ASR backend for Intel iGPU. Built separately from the Ubuntu 22 Core.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+    ca-certificates git build-essential cmake ninja-build pkg-config \
+    python3 python3-pip python3-venv intel-opencl-icd ocl-icd-libopencl1 libze1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/ov && /opt/ov/bin/pip install --no-cache-dir openvino==2026.2.0
+ARG WHISPER_REF=5922450fbce1ed9d1648babd0d5ac4520055b436
+RUN mkdir -p /src/whisper.cpp && cd /src/whisper.cpp \
+    && git init -q && git remote add origin https://github.com/ggml-org/whisper.cpp.git \
+    && git fetch --depth 1 origin "$WHISPER_REF" && git checkout -q FETCH_HEAD \
+    && cmake -S . -B build -G Ninja -DWHISPER_OPENVINO=ON \
+       -DOpenVINO_DIR=/opt/ov/lib/python3.12/site-packages/openvino/cmake \
+       -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF \
+    && cmake --build build -j 2 --target whisper-cli
+ENV LD_LIBRARY_PATH=/opt/ov/lib/python3.12/site-packages/openvino/libs
+ENTRYPOINT ["/opt/ov/bin/python", "/opt/ai/ai_openvino_server.py"]

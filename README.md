@@ -482,3 +482,91 @@ sem texto de origem. Podem configurar-se até três manifestos HTTPS através do
 parâmetro `subtitle_source_addons`, respeitando as necessidades de autenticação
 do fornecedor. As legendas originais e o aviso introdutório da tradução
 mantêm-se intactos.
+
+## AI Subtitle Generator (experimental, disabled by default)
+
+Development integration is available only on `develop`. Do not enable on
+production before a full offline-model + real-media QA pass.
+
+- Once libtorrent confirms **every piece of a video file** is complete, a
+  single background worker can transcribe its audio locally with whisper.cpp.
+  No cloud requests and no runtime model downloads are performed.
+- The original language is detected by Whisper. The existing local
+  Subtitle Translator converts SRT cue text to **Portuguese (pt-PT)** when an
+  installed translation path is available. Portuguese audio retains its
+  original transcript. Model failures leave no advertised partial SRT.
+- Generated tracks are announced through a **separate Stremio addon** as
+  `AI Subtitle Generator · Português (pt-PT)` with `lang=pt-PT`.
+- Cache identity is infohash + file index + audio index + Whisper model name,
+  with files under `<cache-root>/.ai-subtitles/<infohash>/`. Removal of the
+  torrent cache removes the AI SRT in the existing eviction path.
+- The worker currently processes audio track index 0 only. Multi-file torrents
+  use the verified file index; an ambiguous movie/episode mapping is never
+  resolved by guessing a filename.
+- WebAdmin now lists addon readiness in its existing addon selector. A dedicated
+  configuration tab is **not yet implemented**. Client refresh behaviour after
+  generation must be verified independently.
+
+Prerequisites (must be provisioned offline, separately from the source tree):
+`whisper-cli`, `ffmpeg`, a trusted local GGML Whisper model, and the
+CTranslate2 translation pairs for the detected audio language.
+
+Configuration, off unless explicitly enabled:
+
+```sh
+STREMIOSRV_AI_SUBTITLES_ENABLED=0
+STREMIOSRV_AI_WHISPER_MODELS_DIR=./models/whisper
+STREMIOSRV_AI_RUNTIME_DIR=./tools/ai-runtime
+STREMIOSRV_AI_WHISPER_MODEL_FILE=ggml-small.bin
+STREMIOSRV_AI_WHISPER_THREADS=2
+```
+
+The Compose file now passes the required Core variables and mounts both the
+model and binary directories read-only. Place a verified multilingual GGML model
+and a compatible `whisper-cli` executable in those host directories before
+setting `STREMIOSRV_AI_SUBTITLES_ENABLED=true`. Models and binaries are NOT
+shipped in Git. Without these prerequisites, the worker does not start.
+An enabled worker polls every 60 seconds, processes at most one completed
+file at a time, and uses only local binaries. It is not a real-time captioner.
+
+The Stremio manifest is advertised as ready through the WebAdmin dropdown only
+when the Core confirms runtime prerequisites and trusted HTTPS. The core provides
+a guarded `/ai-subtitles/{token}/status.json` endpoint without exposing local
+paths. The auto-worker limits inference to two CPU threads by default and
+throttles failed transcriptions for six hours. The existing translation models
+target Portuguese (`pt`); European Portuguese terminology and orthography
+require functional linguistic QA rather than assuming `pt` is always `pt-PT`.
+
+**Acceptance gates before release:** install/verify bundled whisper binary and
+model, run full-length English→pt-PT and Portuguese→pt-PT media cases, verify
+the addon in App/WebPlayer, rate-limit CPU and temporary audio storage, test
+deletion during an active inference, and demonstrate no regressions in
+download, HLS, VAAPI, IPTV or the original Subtitle Translator. Do not promote
+to `main` or the public repository until these gates pass.
+
+
+## AI to PT — QA v26 (17 November 2026)
+
+The validated on-demand AI Subtitle Generator supports the Stremio native
+Windows app and WebPlayer with a single shared offline Whisper/OpenVINO GPU
+worker, independent client sessions, per-hash/file/audio chunk caches,
+progressive SRT snapshots, and native subtitle size/colour/position/delay.
+Whisper inference is triggered only by explicit `AI to PT` selection and
+an active player clock; no library-wide scan starts automatic GPU work.
+
+**QA validation on `.201`:** native and WebPlayer Direct Play; two concurrent
+WebPlayers at distinct positions; native and WebPlayer on different movies;
+shared cached chunks; client session stop and lease expiry; correct native
+subtitle rendering; buffering-resume synchronisation on partially downloaded
+*Heartland*. Cached subtitle chunks persist after playback stops, and are
+removed together with the associated torrent hash when that torrent cache
+is explicitly evicted.
+
+**Outstanding restrictions:** OpenVINO can fail for unsupported detected
+languages (e.g. `ru`) or silent/no-speech chunks; the shared retry budget
+bounds these attempts and the Core retains bounded HTTP error diagnostics.
+Confirm required local translation models and GPU availability before enabling
+production. External fresh-install acceptance remains a separate gate.
+
+This section supersedes the early experimental worker notes above where they
+refer to automatic scanning or lack of native player support.

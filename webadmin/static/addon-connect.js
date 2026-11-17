@@ -72,6 +72,59 @@
     return `<button class="mini" type="button" data-addon-check="${escapeAttr(addon.id)}">Check updates</button>`;
   }
 
+  function renderAiQueue(addon) {
+    if (addon.id !== 'ai-subtitle-generator') return '';
+    const queue = addon.queue;
+    if (!queue || !Array.isArray(queue.jobs)) {
+      return '<div class="addonUpdateInfo"><b>Fila AI Subtitles</b><div>Estado disponível após o próximo upgrade do Core.</div></div>';
+    }
+    const labels = {
+      queued: 'Em fila', detecting_language: 'A identificar idioma', extracting_audio: 'A extrair áudio',
+      transcribing: 'A transcrever', translating: 'A traduzir',
+      publishing: 'A publicar', ready: 'Legenda pronta',
+      retry_later: 'Erro / nova tentativa pendente',
+      existing_portuguese: 'Legenda portuguesa existente',
+      subtitle_translator_first: 'Subtitle Translator disponível (seleccionar legenda)',
+    };
+    if (queue.mode === 'on_demand') {
+      const active = queue.active;
+      const label = active ? escapeHtml(labels[active.stage] || labels[active.status] ||
+        active.stage || active.status || 'Em processamento') : 'nenhuma';
+      return '<div class="addonUpdateInfo"><b>AI Subtitle Generator · A pedido</b>' +
+        '<div>Seleccionar a faixa AI no WebPlayer para iniciar. Sem varrimento automático.</div>' +
+        '<p><b>Sessão activa:</b> ' + label + '</p></div>';
+    }
+    const rows = queue.jobs.slice().sort((a, b) => (a.priority ?? 9) - (b.priority ?? 9));
+    let body = '<div class="addonUpdateInfo"><b>Fila AI Subtitle Generator</b>';
+    body += '<div>Subtitle Translator primeiro quando existe legenda traduzível; pode exigir selecção manual. Whisper é fallback.</div>';
+    body += '<div>Ordem: sem legenda traduzível → Whisper; legenda traduzível → Subtitle Translator; PT existente → dispensado.</div>';
+    const active = queue.active;
+    if (active) {
+      body += `<p><b>Em processamento:</b> ${escapeHtml(active.title || active.infohash)}
+        · ${escapeHtml(labels[active.status] || active.status)}
+        ${active.status === 'transcribing'
+          ? (active.progressPercent !== undefined && Number.isFinite(Number(active.progressPercent))
+              ? ' · ' + Math.min(99, Math.max(0, Number(active.progressPercent))).toFixed(0) + '%'
+              : ' · progresso indisponível nesta execução')
+          : ''}</p>`;
+    } else body += '<p><b>Em processamento:</b> nenhum</p>';
+    if (!rows.length) body += '<p>Sem ficheiros completos identificados.</p>';
+    rows.forEach((job) => {
+      const isActive = active && active.infohash === job.infohash && active.fileIndex === job.fileIndex;
+      const displayStatus = isActive ? active.status : job.status;
+      const displayProgress = isActive && displayStatus === 'transcribing' &&
+        active.progressPercent !== undefined && Number.isFinite(Number(active.progressPercent))
+        ? ' · ' + Math.min(99, Math.max(0, Number(active.progressPercent))).toFixed(0) + '%'
+        : '';
+      body += `<div style="padding:5px 0;border-top:1px solid rgba(232,207,105,.15)">
+        <b>${escapeHtml(job.title || job.infohash)}</b>
+        · ${escapeHtml(labels[displayStatus] || displayStatus)}${displayProgress}
+        · Idiomas: ${escapeHtml((job.localLanguages || []).join(', ') || 'não detectados')}
+        · ${escapeHtml((job.infohash || '').slice(0,12))}</div>`;
+    });
+    return body + '</div>';
+  }
+
   function render() {
     const addon = addons.find(item => item.id === select.value);
     if (!addon) {
@@ -111,6 +164,7 @@
         ${escapeHtml(versionLine(addon.update))}<br>
         ${escapeHtml((addon.update && addon.update.message) || 'Update status unavailable.')}
       </div>
+      ${renderAiQueue(addon)}
       <div class="addonActions">
         ${addon.managementUrl ? `<a class="mini" href="${escapeAttr(addon.managementUrl)}" ${addon.id === 'iptv-local' ? '' : 'target="_blank" rel="noopener"'}>${addon.id === 'iptv-local' ? 'Gerir IPTV / Canais' : addon.id === 'subtitle-translator' ? 'Translate subtitles' : 'Manage / Delete titles'}</a>` : ''}
         ${updateButton(addon)}
@@ -159,6 +213,26 @@
       if (info) info.innerHTML = `<b>Addon updates</b><br>${escapeHtml(error.message || 'Update failed.')}`;
     }
   }
+
+  // Read-only, bounded polling of the selected addon only.
+  // Never run a heavy Core job or trigger translation from a dashboard refresh.
+  async function refreshAiQueue() {
+    if (document.hidden || select.value !== 'ai-subtitle-generator') return;
+    try {
+      const response = await fetch('/api/addons', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (select.value !== 'ai-subtitle-generator') return;
+      const current = (payload.addons || []).find(item => item.id === select.value);
+      if (!current) return;
+      const idx = addons.findIndex(item => item.id === current.id);
+      if (idx >= 0) addons[idx] = current;
+      render();
+    } catch (_) {
+      // The previous snapshot remains visible during a brief connectivity loss.
+    }
+  }
+  window.setInterval(refreshAiQueue, 30000);
 
   select.addEventListener('change', render);
   box.addEventListener('click', event => {

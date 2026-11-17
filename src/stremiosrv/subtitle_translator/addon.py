@@ -455,9 +455,11 @@ def subtitles(token: str, type_: str, video_id: str, request: Request,
     found: list[dict] = []
     for ih in hashes:
         for meta in list_cached(root, ih, video_id):
+            display = (meta.get("sourceAddon") or "Legenda traduzida") + " · " + (meta.get("source") or "?").upper() + " → PT"
             found.append({
                 "id": meta["key"], "lang": "pt-PT",
-                "url": prefix + "file/" + ih + "/" + meta["key"] + ".srt",
+                "url": prefix + "file/" + ih + "/" + meta["key"] + ".srt"
+                       + "?stremioLabel=" + quote(display, safe=""),
                 "name": "Em cache · " + (meta.get("sourceAddon") or "Stremio Server Addon")
                         + " · " + meta.get("source", "").upper()
                         + " → PT · " + (meta.get("sourceName") or meta["key"][:8]),
@@ -489,9 +491,10 @@ def subtitles(token: str, type_: str, video_id: str, request: Request,
                 + item["id"] + ".srt?type_=" + quote(type_)
                 + "&extra=" + quote(extra, safe="")
             )
+            display = (item.get("sourceAddon") or ("Legenda embutida" if item.get("kind") == "embedded" else "Legenda local")) + " · " + item["sourceLanguage"].upper() + " → PT"
             found.append({
                 "id": item["id"], "lang": "pt-PT",
-                "url": url,
+                "url": url + "&stremioLabel=" + quote(display, safe=""),
                 # Each pt-PT variant is an explicit SOURCE choice in the native
                 # Stremio subtitle menu. No automatic source selection occurs.
                 "name": (item.get("sourceAddon") or (
