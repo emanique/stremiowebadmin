@@ -488,10 +488,10 @@ class DemandSubtitleSessions:
                 if not self._active(sid):
                     return
                 raw, language = json_to_srt(json.loads(
-                    (scratch / "whisper.json").read_text("utf8")))
+                    (scratch / "whisper.json").read_text("utf8")), allow_silence=True)
                 if language not in ("en", "fr", "es", "pt", "pt-pt"):
                     raise GenerationUnavailable("unsupported detected audio language: " + language)
-                if language not in ("pt", "pt-pt"):
+                if raw and language not in ("pt", "pt-pt"):
                     if not translation_path(language, "pt"):
                         raise GenerationUnavailable("local translation unavailable: " + language)
                     self._set(sid, stage="translating")
@@ -499,7 +499,10 @@ class DemandSubtitleSessions:
                         raw, lambda lines: translate_many(lines, language, "pt-PT"))
                 if not self._active(sid):
                     return
-                text = _absolute_srt(raw, position)
+                # A single newline is a valid, intentionally empty cached
+                # block: the scheduler can advance, while SRT clients see no
+                # subtitle cue. Do not emit a fabricated silence caption.
+                text = _absolute_srt(raw, position) if raw else "\n"
                 from stremiosrv import cache
                 with cache._TITLE_PURGE_LOCK:
                     if not self._active(sid):

@@ -61,7 +61,7 @@ def _stamp(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{millis:03d}"
 
 
-def json_to_srt(result: dict) -> tuple[str, str]:
+def json_to_srt(result: dict, *, allow_silence: bool = False) -> tuple[str, str]:
     """Convert whisper.cpp JSON; discard malformed segments, never invent timings."""
     transcription = result.get("transcription")
     language = str((result.get("result") or {}).get("language", "")).lower()
@@ -87,6 +87,11 @@ def json_to_srt(result: dict) -> tuple[str, str]:
             continue
         blocks.append(f"{len(blocks)+1}\n{_stamp(begin)} --> {_stamp(end)}\n{text}")
         last_end = end
+    # A successful Whisper response with zero segments can indicate genuine
+    # silence. Only on-demand blocks opt in; malformed/non-empty responses
+    # still fail so provider defects are not hidden.
+    if allow_silence and transcription == []:
+        return "", language
     output = "\n\n".join(blocks) + "\n"
     if not blocks or len(output.encode()) > MAX_SUBTITLE:
         raise GenerationUnavailable("transcription empty or too large")
