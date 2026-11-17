@@ -120,6 +120,7 @@ services:
       WEBADMIN_STATE: /data
       STREMIO_CONFIG_FILE: /config/admin-settings.json
       STREMIO_URL: http://stremio-libtorrent-server:11470
+      STREMIO_ADDON_CACHE_RO: /addon-cache
       IPTV_CONFIG_FILE: /config/iptv-local.json
       IPTV_PREFERENCES_FILE: /config/iptv-channel-preferences.json
       IPTV_UPLOAD_FILE: /config/iptv-playlist-upload.m3u
@@ -138,6 +139,8 @@ services:
     - ${WEBADMIN_BIND_IP:-127.0.0.1}:8090:8090
     volumes:
     - webadmin-data:/data
+    - ./webadmin/addon_links.py:/app/addon_links.py:ro
+    - ${STREMIO_DATA_DIR:-stremio-cache}:/addon-cache:ro
     - stremio-config:/config
     - /var/run/docker.sock:/var/run/docker.sock
     - /var/lib/stremio-webadmin/port-status.json:/var/lib/stremio-webadmin/port-status.json:ro

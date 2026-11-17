@@ -71,19 +71,21 @@ def _manifest_origin(default: str) -> str:
 
 
 def _server_update_state() -> dict[str, object]:
-    """Version/update state of the runtime that owns the Library addon."""
+    """Local-only status for addon discovery; never perform remote version checks.
+
+    The normal version/update endpoints retain the full remote release check.
+    An addon catalog should not block on GitHub/network timeouts.
+    """
     try:
-        versions = lifecycle.component_versions()
-        server = versions.get("server") if isinstance(versions, dict) else {}
-        server = server if isinstance(server, dict) else {}
+        installed = lifecycle._installed_server_version()
         return {
             "mode": "server-runtime",
-            "installed": server.get("installed"),
-            "available": server.get("available"),
-            "updateAvailable": server.get("updateAvailable"),
-            "running": bool(server.get("updateInProgress")),
+            "installed": installed,
+            "available": None,
+            "updateAvailable": None,
+            "running": bool(lifecycle.legacy.UPDATE_LOCK.locked()),
             "endpoint": "/api/addons/library/update",
-            "message": "The Library addon is bundled with the Stremio server runtime.",
+            "message": "Updates are checked in the server update page.",
         }
     except Exception:
         return {
@@ -93,7 +95,7 @@ def _server_update_state() -> dict[str, object]:
             "updateAvailable": None,
             "running": False,
             "endpoint": "/api/addons/library/update",
-            "message": "Could not verify the server release that contains this addon.",
+            "message": "Could not verify the installed server release.",
         }
 
 

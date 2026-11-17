@@ -370,13 +370,27 @@ def master(
             dest.pick(target.hostname, target.port or (443 if target.scheme == "https" else 80), False)
         except (OSError, dest.Refused) as exc:
             raise HTTPException(status_code=502, detail="IPTV source unreachable") from exc
-        media = reader_url(request, register(mediaURL, False))
+        media = reader_url(request, register(mediaURL, False, iptv=True))
     else:
         media = _resolve_media_for_hls(request, mediaURL)
     try:
         pr = probe_media(media)
     except ProbeTimeoutError as e:
         raise HTTPException(status_code=504, detail="probe timed out") from e
+    if signed_iptv and not any(s.get("track") == "video" for s in pr.get("streams", [])):
+        # A transient 404/502 while probing must not launch an empty-source
+        # FFmpeg job. Each attempt gets a newly registered guarded reader.
+        from stremiosrv.api.media_fetch import reader_url, register
+        for _ in range(2):
+            media = reader_url(request, register(mediaURL, False, iptv=True))
+            try:
+                pr = probe_media(media)
+            except ProbeTimeoutError:
+                continue
+            if any(s.get("track") == "video" for s in pr.get("streams", [])):
+                break
+        if not any(s.get("track") == "video" for s in pr.get("streams", [])):
+            raise HTTPException(status_code=502, detail="IPTV stream unavailable; retry later")
     _refuse_internal_hls_playlist(request, mediaURL, pr)
     dec = decide(pr, videoCodecs or ["h264"], audioCodecs or ["aac"], maxAudioChannels, maxWidth)
     source_video = next(

@@ -56,22 +56,27 @@ TICKET_CAP = 8192
 _Ticket = tuple[str, bool, tuple[tuple[str, str], ...]]
 _tickets: OrderedDict[str, _Ticket] = OrderedDict()
 _tickets_lock = Lock()
+_iptv_tickets: set[str] = set()  # Identifies private IPTV fetches; never part of a URL.
 
 
 def reset() -> None:
     """Drop every ticket (tests)."""
     with _tickets_lock:
         _tickets.clear()
+        _iptv_tickets.clear()
 
 
-def register(url: str, home: bool, headers: tuple[tuple[str, str], ...] | None = None) -> str:
+def register(url: str, home: bool, headers: tuple[tuple[str, str], ...] | None = None, *, iptv: bool = False) -> str:
     """Record an external fetch and return its unguessable ticket id."""
     ticket = secrets.token_urlsafe(16)
     with _tickets_lock:
         _tickets[ticket] = (url, home, tuple(headers or ()))
+        if iptv:
+            _iptv_tickets.add(ticket)
         _tickets.move_to_end(ticket)
         while len(_tickets) > TICKET_CAP:
-            _tickets.popitem(last=False)
+            evicted, _ = _tickets.popitem(last=False)
+            _iptv_tickets.discard(evicted)
     return ticket
 
 
@@ -375,6 +380,8 @@ def media_reader(secret: str, ticket: str, request: Request) -> Response:
     if hit is None:
         return Response(status_code=404)
     url, home, ticket_headers = hit
+    with _tickets_lock:
+        is_iptv = ticket in _iptv_tickets
     fwd = {"user-agent": "Mozilla/5.0"}
     for name, value in ticket_headers:  # a proxied mediaURL's own `h=` headers (C1), e.g. auth
         fwd[name] = value
@@ -382,13 +389,32 @@ def media_reader(secret: str, ticket: str, request: Request) -> Response:
     if rng:
         fwd["range"] = rng
     deadline = upstream.Deadline(upstream.DEADLINE)
-    try:
-        resp, conn = upstream.open_url(url, "GET", fwd, home, deadline)
-    except dest.Refused as e:  # a hop resolved into the LAN/metadata: refused, and worth a log line
-        logger.warning("media source refused by destination guard: %s", e)
-        return Response(status_code=502, content=b"media source unreachable")
-    except Exception:  # noqa: BLE001 — unreachable/malformed/timeout: one clean 502
-        return Response(status_code=502, content=b"media source unreachable")
+    # Live IPTV services may briefly reply 404/502 while a stream is starting.
+    # Retry only tickets explicitly created by the private IPTV route, never
+    # arbitrary external media requests. Every attempt goes through the same
+    # redirect-aware destination guard; no upstream credentials are logged.
+    for attempt in range(3 if is_iptv else 1):
+        try:
+            resp, conn = upstream.open_url(url, "GET", fwd, home, deadline)
+        except dest.Refused:
+            logger.warning("media source refused by destination guard")
+            return Response(status_code=502, content=b"media source unreachable")
+        except Exception as exc:  # network/handshake/timeout; never expose the URL
+            logger.warning("media reader fetch failed: iptv=%s attempt=%d error=%s",
+                           is_iptv, attempt + 1, type(exc).__name__)
+            if not is_iptv or attempt == 2:
+                return Response(status_code=502, content=b"media source unreachable")
+        else:
+            if not is_iptv or resp.status not in (404, 429, 500, 502, 503, 504):
+                break
+            logger.warning("IPTV upstream returned status=%d attempt=%d",
+                           resp.status, attempt + 1)
+            if attempt == 2:
+                break
+            _close(resp, conn)
+        # The retry is bounded by the same absolute 30-second deadline.
+        time.sleep(0.35)
+
     ctype = resp.getheader("Content-Type", "") or ""
     if playlist.is_playlist(urllib.parse.urlsplit(url).path, ctype):
         try:
